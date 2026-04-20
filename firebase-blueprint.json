@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User specific metadata and settings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "email"]
+    },
+    "Word": {
+      "title": "Vocabulary Word",
+      "description": "A single word or phrase the user is learning.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "ukPhonetic": { "type": "string" },
+        "usPhonetic": { "type": "string" },
+        "pos": { "type": "string" },
+        "definition": { "type": "string" },
+        "category": { "type": "string" },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sentence": { "type": "string" },
+              "translation": { "type": "string" }
+            }
+          }
+        },
+        "collocations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "phrase": { "type": "string" },
+              "translation": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "number" },
+        "lastReviewedAt": { "type": "number" },
+        "masteryLevel": { "type": "number" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "text", "definition", "userId"]
+    },
+    "Scenario": {
+      "title": "Practice Scenario",
+      "description": "Custom dialogue scenario for chat practice.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "systemPrompt": { "type": "string" },
+        "initialMessage": { "type": "string" },
+        "userId": { "type": "string" },
+        "isDefault": { "type": "boolean" }
+      },
+      "required": ["id", "title", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profile and global settings."
+    },
+    "/words/{wordId}": {
+      "schema": "Word",
+      "description": "Global collection of vocabulary words, keyed by a unique ID and filtered by ownerId."
+    },
+    "/scenarios/{scenarioId}": {
+      "schema": "Scenario",
+      "description": "Custom scenarios created by users."
+    }
+  }
+}

@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definitions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    // 1. Users Collection
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.userId == userId && data.email is string && data.email.size() <= 200;
+      }
+
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) 
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL']);
+    }
+
+    // 2. Words Collection
+    match /words/{wordId} {
+      function isValidWord(data) {
+        return data.id is string && data.id.size() <= 128 
+            && data.text is string && data.text.size() <= 500
+            && data.definition is string && data.definition.size() <= 2000
+            && data.userId == request.auth.uid
+            && (data.masteryLevel >= 0 && data.masteryLevel <= 8)
+            && data.createdAt is number;
+      }
+
+      // Secure list queries: user can only query their own words
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isVerified() && isValidId(wordId) && isValidWord(request.resource.data);
+      
+      allow update: if isSignedIn() && isVerified() && isOwner(resource.data.userId) 
+                    && isValidWord(request.resource.data)
+                    && request.resource.data.userId == resource.data.userId
+                    && (
+                      // Action: Mastery Level Progress
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['masteryLevel', 'lastReviewedAt']) ||
+                      // Action: Metadata Edit
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'definition', 'ukPhonetic', 'usPhonetic', 'pos', 'category', 'examples', 'collocations', 'tags'])
+                    );
+      
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+    }
+
+    // 3. Scenarios Collection
+    match /scenarios/{scenarioId} {
+      function isValidScenario(data) {
+        return data.id is string && data.id.size() <= 128
+            && data.title is string && data.title.size() <= 200
+            && data.userId == request.auth.uid;
+      }
+
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.isDefault == true);
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.isDefault == true);
+      
+      allow create: if isSignedIn() && isVerified() && isValidId(scenarioId) && isValidScenario(request.resource.data);
+      
+      allow update: if isSignedIn() && isVerified() && isOwner(resource.data.userId) 
+                    && isValidScenario(request.resource.data)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'category', 'systemPrompt', 'initialMessage']);
+      
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+    }
+  }
+}

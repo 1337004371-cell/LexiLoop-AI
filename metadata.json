@@ -1,0 +1,6 @@
+{
+  "name": "LexiLoop AI",
+  "description": "A smart, AI-powered vocabulary learning tool designed to solve real-world language acquisition pain points through context-aware learning and personalized review.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
