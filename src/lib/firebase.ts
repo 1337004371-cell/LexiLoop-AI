@@ -21,5 +21,5 @@ export const collections = {
   users: 'users'
 };
 export const handleFirestoreError = (error: any) => {
-  console.error("Firestore Error:", error);
+  console.error("Firebase Error:", error);
 };
