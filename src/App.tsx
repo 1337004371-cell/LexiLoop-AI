@@ -59,7 +59,7 @@ import {
 } from 'firebase/firestore';
 
 import { isWordDue } from './lib/ebbinghaus';
-alert("这是最新部署的版本！");
+alert("这是最新部署的版本!");
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
