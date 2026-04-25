@@ -15,7 +15,7 @@ import {
   X,
   ChevronLeft,
   Layers,
-  FileText,
+  FileText, // 统一使用这个，删掉下方的 FileTextIcon
   Sparkles,
   Check,
   CheckSquare,
@@ -25,7 +25,6 @@ import {
   Languages,
   Image as ImageIcon,
   Upload,
-  FileText as FileTextIcon,
   RotateCcw,
   Briefcase,
   ShoppingBag,
@@ -37,6 +36,7 @@ import {
   LogOut,
   User as UserIcon
 } from 'lucide-react';
+
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -59,7 +59,6 @@ import {
 } from 'firebase/firestore';
 
 import { isWordDue } from './lib/ebbinghaus';
-
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
