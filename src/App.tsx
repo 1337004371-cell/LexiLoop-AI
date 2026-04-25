@@ -44,7 +44,7 @@ import { Word, Scenario, ChatMessage } from './types';
 import { getGeminiResponse, generateWordDetails, generatePodcastDialogue, parseScenarioFromImage } from './lib/gemini';
 import { useSpeech } from './hooks/useSpeech';
 import { useAuth } from './components/AuthProvider';
-import { auth, db } from './lib/firebase';
+import { auth, db, googleProvider, collections, handleFirestoreError } from './lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import { 
   getDocs, 
