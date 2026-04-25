@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth"; // 加上这一行
 
-// 这些变量会从 Vercel 的 Environment Variables 中读取
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -11,8 +11,8 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// 初始化 Firebase
 const app = initializeApp(firebaseConfig);
 
-// 导出数据库实例供全书使用
+// 重点：同时导出 db 和 auth
 export const db = getFirestore(app);
+export const auth = getAuth(app);
