@@ -8,7 +8,7 @@ export const getGeminiResponse = async (
 ) => {
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: prompt,
       config: {
         systemInstruction,
@@ -42,7 +42,7 @@ export const generateWordDetails = async (word: string) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -116,7 +116,7 @@ export const generatePodcastDialogue = async (words: string[]) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -173,7 +173,7 @@ export const parseScenarioFromImage = async (base64Image: string, mimeType: stri
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: [
         { inlineData: { data: base64Image, mimeType: mimeType } },
         { text: prompt }
