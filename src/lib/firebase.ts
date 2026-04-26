@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-console.log("ENV CHECK:", import.meta.env);
+console.log("API KEY CHECK:", "AIzaSyC7Juu5jWx6nMVHX6Xp0C9Ct3048JzZCIE");
 
 const firebaseConfig = {
   apiKey: "AIzaSyC7Juu5jWx6nMVHX6Xp0C9Ct3048JzZCIE",
