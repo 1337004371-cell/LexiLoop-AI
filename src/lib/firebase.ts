@@ -1,5 +1,3 @@
-console.log("🔥 NEW FIREBASE FILE LOADED 🔥");
-throw new Error("FIREBASE FILE LOADED");
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
