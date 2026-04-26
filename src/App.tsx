@@ -558,7 +558,7 @@ export default function App() {
           lastReviewedAt: Date.now()
         });
       } catch (e) {
-        handleFirestoreError(e, 'update_mastery', `words/${wordId}`);
+        console.error(e);
       }
     } else {
       localStorage.setItem('lexiloop_words', JSON.stringify(updatedWords));
@@ -710,7 +710,7 @@ export default function App() {
       try {
         await setDoc(doc(db, 'scenarios', newScenario.id), { ...newScenario, userId: user.uid });
       } catch (e) {
-        handleFirestoreError(e, 'save_scenario', `scenarios/${newScenario.id}`);
+        console.error(e);
       }
     } else {
       localStorage.setItem('lexiloop_scenarios', JSON.stringify(nextCustom));
@@ -783,7 +783,7 @@ export default function App() {
             collocations: details.collocations,
           });
         } catch (e) {
-          handleFirestoreError(e, 'refresh_word', `words/${id}`);
+          console.error(e);
         }
       }
       saveWords(updatedWords);
@@ -799,7 +799,7 @@ export default function App() {
       try {
         await deleteDoc(doc(db, 'words', id));
       } catch (e) {
-        handleFirestoreError(e, 'delete_word', `words/${id}`);
+        console.error(e);
       }
     } else {
       localStorage.setItem('lexiloop_words', JSON.stringify(nextWords));
