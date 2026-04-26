@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { collection, query, where } from "firebase/firestore";
 import { 
   BookOpen, 
   MessageSquare, 
@@ -617,7 +618,10 @@ export default function App() {
         setIsLoading(true);
         try {
           // Load Words
-          const wordsQuery = query(collections.words, where('userId', '==', user.uid));
+          const wordsQuery = query(
+           collection(db, "words"),
+           where("userId", "==", user.uid)
+          );
           const wordsSnap = await getDocs(wordsQuery);
           const cloudWords = wordsSnap.docs.map(d => d.data() as Word);
           
@@ -649,7 +653,10 @@ export default function App() {
           }
 
           // Load Scenarios
-          const scenariosQuery = query(collections.scenarios, where('userId', '==', user.uid));
+         const scenariosQuery = query(
+           collection(db, "scenarios"),
+           where("userId", "==", user.uid)
+           );
           const scenariosSnap = await getDocs(scenariosQuery);
           const cloudScenarios = scenariosSnap.docs.map(d => d.data() as Scenario);
           
