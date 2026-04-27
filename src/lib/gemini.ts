@@ -34,7 +34,6 @@ export const getGeminiResponse = async (
     return "Sorry, I'm having trouble connecting to the AI service right now.";
   }
 };
-};
 
 export const generateWordDetails = async (word: string) => {
   const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
