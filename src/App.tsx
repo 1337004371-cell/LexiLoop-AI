@@ -619,7 +619,8 @@ export default function App() {
         try {
           // Load Words
           const wordsQuery = query(
-           collection(db, "words"),
+          collection(db, "users", user.uid, "words")
+          );
            where("userId", "==", user.uid)
           );
           const wordsSnap = await getDocs(wordsQuery);
@@ -751,7 +752,7 @@ export default function App() {
           };
 
           if (user) {
-            await setDoc(doc(db, 'words', newWord.id), { ...newWord, userId: user.uid });
+            await setDoc(doc(db, 'users', user.uid, 'words', newWord.id), { ...newWord });
           }
           saveWords([newWord, ...words]);
         }
