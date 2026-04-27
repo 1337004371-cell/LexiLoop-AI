@@ -1,157 +1,137 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY});
-
+const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
 export const getGeminiResponse = async (
   prompt: string,
   systemInstruction?: string
 ) => {
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
+
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        systemInstruction,
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
       },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [
+          ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+          { role: "user", content: prompt }
+        ],
+        stream: false
+      })
     });
-    return response.text;
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || "DeepSeek API Error");
+    }
+
+    return data.choices[0].message.content;
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Sorry, I'm having trouble connecting right now.";
+    console.error("DeepSeek API Error:", error);
+    return "Sorry, I'm having trouble connecting to the AI service right now.";
   }
+};
 };
 
 export const generateWordDetails = async (word: string) => {
-  const prompt = `Provide detailed info for the English word or phrase: "${word}". 
-  Include: 
-  1. Part of Speech (词性), e.g. "adj.", "noun", "verb".
-  2. British (UK) and American (US) Phonetics (IPA).
-  3. Concise Chinese definition.
-  4. 2-3 Common Collocations (常见搭配) with translations.
-  5. 3 real-world professional or daily life example sentences with Chinese translations.
-  
-  Return in JSON format:
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
+  const cacheKey = `word_detail_v1_${word.toLowerCase()}`;
+
+  // 1. 尝试从本地缓存获取
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      localStorage.removeItem(cacheKey);
+    }
+  }
+
+  // 2. DeepSeek Prompt
+  const prompt = `Analyze the English word/phrase "${word}". Provide the following information in strict JSON format:
   {
-    "pos": string,
-    "ukPhonetic": string,
-    "usPhonetic": string,
-    "definition": string,
-    "collocations": [{ "phrase": string, "translation": string }],
-    "examples": [{ "sentence": string, "translation": string }]
-  }`;
+    "pos": "part of speech",
+    "ukPhonetic": "UK phonetic",
+    "usPhonetic": "US phonetic",
+    "definition": "Chinese definition",
+    "collocations": [{ "phrase": "phrase", "translation": "translation" }],
+    "examples": [{ "sentence": "sentence", "translation": "translation" }]
+  }
+  Important: Return ONLY the JSON object, no other text.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            pos: { type: Type.STRING },
-            ukPhonetic: { type: Type.STRING },
-            usPhonetic: { type: Type.STRING },
-            definition: { type: Type.STRING },
-            collocations: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  phrase: { type: Type.STRING },
-                  translation: { type: Type.STRING }
-                },
-                required: ["phrase", "translation"]
-              }
-            },
-            examples: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  sentence: { type: Type.STRING },
-                  translation: { type: Type.STRING }
-                },
-                required: ["sentence", "translation"]
-              }
-            }
-          },
-          required: ["pos", "ukPhonetic", "usPhonetic", "definition", "collocations", "examples"]
-        }
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
       },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [
+          { role: "system", content: "You are a professional English teacher. Response must be in JSON." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      })
     });
-    return JSON.parse(response.text || "{}");
+
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+
+    // 3. 存入缓存并返回
+    localStorage.setItem(cacheKey, content);
+    return JSON.parse(content);
   } catch (error) {
-    console.error("Gemini Word Detail Error:", error);
+    console.error("DeepSeek Word Detail Error:", error);
     return null;
   }
 };
 
 export const generatePodcastDialogue = async (words: string[]) => {
-  const prompt = `Create a realistic workplace or daily life conversation script between two people (Person A and Person B) that naturally incorporates these English words/phrases: ${words.join(', ')}.
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
+
+  const prompt = `Create a realistic workplace or daily life conversation script between two people (Person A and Person B) that naturally incorporates these English words: ${words.join(', ')}.
   
   Requirements:
   1. Setting: A specific professional or daily scenario.
-  2. Length: Approximately 250-320 words.
-  3. Tone: Very natural and conversational.
-  4. Format: Line by line dialogue.
-  5. Characters: Give Person A and Person B realistic names (e.g., Sarah, Mark, etc.).
-  
-  You must provide:
-  1. A list of lines, each with the speaker's name, the English text, and Chinese translation.
-  2. The character identity mapping (which name corresponds to speaker A or B role).
+  2. Tone: Very natural and conversational.
+  3. Format: Line by line dialogue.
 
-  Return in JSON format:
+  Return the dialogue in strict JSON format:
   {
-    "characters": { "A": "string", "B": "string" },
+    "characters": { "A": "Name", "B": "Name" },
     "lines": [
-      {
-        "speaker": "A" | "B",
-        "name": "string",
-        "text": "string",
-        "translation": "string"
-      }
+      { "speaker": "A", "name": "Name", "text": "English text", "translation": "Chinese translation" },
+      { "speaker": "B", "name": "Name", "text": "English text", "translation": "Chinese translation" }
     ]
   }`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            characters: {
-              type: Type.OBJECT,
-              properties: {
-                A: { type: Type.STRING },
-                B: { type: Type.STRING }
-              },
-              required: ["A", "B"]
-            },
-            lines: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  speaker: { type: Type.STRING, enum: ["A", "B"] },
-                  name: { type: Type.STRING },
-                  text: { type: Type.STRING },
-                  translation: { type: Type.STRING }
-                },
-                required: ["speaker", "name", "text", "translation"]
-              }
-            }
-          },
-          required: ["characters", "lines"]
-        }
-      }
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [
+          { role: "system", content: "You are a professional language learning content creator. Response must be in JSON." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      })
     });
-    return JSON.parse(response.text || "{}");
+
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+    return JSON.parse(content);
   } catch (error) {
-    console.error("Gemini Podcast Generation Error:", error);
+    console.error("DeepSeek Podcast Error:", error);
     return null;
   }
 };
