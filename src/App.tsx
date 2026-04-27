@@ -621,8 +621,6 @@ export default function App() {
           const wordsQuery = query(
           collection(db, "users", user.uid, "words")
           );
-           where("userId", "==", user.uid)
-          );
           const wordsSnap = await getDocs(wordsQuery);
           const cloudWords = wordsSnap.docs.map(d => d.data() as Word);
           
