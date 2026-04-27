@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth'; // 1. 新增导入
 
 const firebaseConfig = {
-  // 这些信息在 Firebase 控制台 -> 项目设置 (齿轮图标) -> 你的应用里找
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -12,4 +12,9 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// 2. 导出 db 供单词同步使用
 export const db = getFirestore(app);
+
+// 3. 导出 auth 供登录功能使用（修复报错的关键）
+export const auth = getAuth(app);
