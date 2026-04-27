@@ -3,12 +3,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'; // 1. 导入 Google 提供者
 
 const firebaseConfig = {
-  apiKey: "AIzaSyC7Juu5jWx6nMVHX6Xp0C9Ct3048JzZCIE",
-  authDomain: "gen-lang-client-0203578664.firebaseapp.com",
-  projectId: "ai-studio-7d222616-f846-4337-b091-028d2c5c560a",
-  storageBucket: "gen-lang-client-0203578664.firebasestorage.app",
-  messagingSenderId: "100009268064",
-  appId: "1:100009268064:web:3150ce2c373549e0fbc405"
+  apiKey: "AIzaSyAr35y3_waA2r8VyrSvi-OPEbOe_vZgaxE",
+  authDomain: "lexiloop-new.firebaseapp.com",
+  projectId: "lexiloop-new",
+  storageBucket: "lexiloop-new.firebasestorage.app",
+  messagingSenderId: "474947903122",
+  appId: "1:474947903122:web:e093ebaa5483d0da07104b"
 };
 
 const app = initializeApp(firebaseConfig);
