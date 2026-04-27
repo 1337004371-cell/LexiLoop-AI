@@ -35,21 +35,29 @@ export const getGeminiResponse = async (
   }
 };
 
+// 注意：确保文件顶部有这两行导入，如果没有请加上
+import { db } from './firebase'; 
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
 export const generateWordDetails = async (word: string) => {
   const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
-  const cacheKey = `word_detail_v1_${word.toLowerCase()}`;
+  const wordKey = word.toLowerCase().trim();
 
-  // 1. 尝试从本地缓存获取
-  const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch (e) {
-      localStorage.removeItem(cacheKey);
+  // 1. 先尝试从 Firestore 云端数据库获取（实现跨设备同步的关键）
+  try {
+    const docRef = doc(db, "word_cache", wordKey);
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists()) {
+      console.log("从云端获取到单词详情:", word);
+      return docSnap.data();
     }
+  } catch (e) {
+    console.error("云端读取失败:", e);
+    // 如果云端读取失败，继续尝试 API 调用
   }
 
-  // 2. DeepSeek Prompt
+  // 2. 如果云端没有，则调用 DeepSeek API
   const prompt = `Analyze the English word/phrase "${word}". Provide the following information in strict JSON format:
   {
     "pos": "part of speech",
@@ -79,13 +87,21 @@ export const generateWordDetails = async (word: string) => {
     });
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
+    const contentString = data.choices[0].message.content;
+    const content = JSON.parse(contentString);
 
-    // 3. 存入缓存并返回
-    localStorage.setItem(cacheKey, content);
-    return JSON.parse(content);
+    // 3. 拿到结果后，立刻存入 Firestore 云端
+    // 这样下次你用另一台设备打开，就能直接从第1步获取，不用再花钱调 API 了
+    try {
+      await setDoc(doc(db, "word_cache", wordKey), content);
+      console.log("单词已同步至云端");
+    } catch (e) {
+      console.error("同步至云端失败:", e);
+    }
+
+    return content;
   } catch (error) {
-    console.error("DeepSeek Word Detail Error:", error);
+    console.error("DeepSeek 单词解析错误:", error);
     return null;
   }
 };
