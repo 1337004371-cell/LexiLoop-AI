@@ -3,12 +3,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'; // 1. 导入 Google 提供者
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyC7Juu5jWx6nMVHX6Xp0C9Ct3048JzZCIE",
+  authDomain: "gen-lang-client-0203578664.firebaseapp.com",
+  projectId: "gen-lang-client-0203578664",
+  storageBucket: "gen-lang-client-0203578664.firebasestorage.app",
+  messagingSenderId: "100009268064",
+  appId: "1:100009268064:web:3150ce2c373549e0fbc405"
 };
 
 const app = initializeApp(firebaseConfig);
