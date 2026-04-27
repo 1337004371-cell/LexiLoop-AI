@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth'; // 1. 新增导入
+import { getAuth, GoogleAuthProvider } from 'firebase/auth'; // 1. 导入 Google 提供者
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,8 +13,16 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// 2. 导出 db 供单词同步使用
+// 导出数据库
 export const db = getFirestore(app);
 
-// 3. 导出 auth 供登录功能使用（修复报错的关键）
+// 导出身份验证模块
 export const auth = getAuth(app);
+
+// 导出 Google 登录提供者 (修复当前报错的关键)
+export const googleProvider = new GoogleAuthProvider(); 
+
+// 可选：配置 Google 登录总是弹出账号选择框
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
