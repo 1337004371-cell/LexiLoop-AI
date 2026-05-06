@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, query, where } from "firebase/firestore";
-import { 
+import {
   BookOpen, 
   MessageSquare, 
   Headphones, 
@@ -35,21 +34,28 @@ import {
   XCircle,
   LogIn,
   LogOut,
-  User as UserIcon
+  User as UserIcon,
+  RefreshCcw,
+  ThumbsUp,
+  Pause,
+  Lightbulb,
+  Target
 } from 'lucide-react';
 
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Word, Scenario, ChatMessage } from './types';
+import { Word, Scenario, ChatMessage, ChatSession, Category } from './types';
 import { getGeminiResponse, generateWordDetails, generatePodcastDialogue, parseScenarioFromImage } from './lib/gemini';
 import { useSpeech } from './hooks/useSpeech';
+import PodcastView from './components/PodcastView';
 import { useAuth } from './components/AuthProvider';
 import { auth, db, googleProvider } from './lib/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
-import { 
-  getDocs, 
-  query, 
+import {
+  getDocs,
+  collection,
+  query,
   where, 
   doc, 
   setDoc, 
@@ -522,19 +528,28 @@ export default function App() {
   const [scenarios, setScenarios] = useState<Scenario[]>(DEFAULT_SCENARIOS);
   const [selectedWordIds, setSelectedWordIds] = useState<Set<string>>(new Set());
   const [learningWords, setLearningWords] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedCategory, setSelectedCategory] = useState<string>('Workplace');
   const [isAddingWord, setIsAddingWord] = useState(false);
   const [isAddingScenario, setIsAddingScenario] = useState(false);
   const [scenarioMode, setScenarioMode] = useState<'selection' | 'manual' | 'image'>('selection');
   const [newWordInput, setNewWordInput] = useState('');
+  const [addWordTab, setAddWordTab] = useState<'text' | 'voice' | 'image'>('text');
+  const [batchProgress, setBatchProgress] = useState<{ total: number; done: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInspecting, setIsInspecting] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<Scenario | null>(null);
   const [returnTab, setReturnTab] = useState<'book' | 'review'>('book');
   const [mode, setMode] = useState<'normal' | 'flashcard' | 'podcast' | 'spelling' | 'pronounce'>('normal');
-  const [podcastData, setPodcastData] = useState<{ english: string, chinese: string } | null>(null);
+  const [podcastData, setPodcastData] = useState<any>(null);
   const [inspectedWord, setInspectedWord] = useState<{ text: string, details: any } | null>(null);
   const [reviewQueue, setReviewQueue] = useState<Word[]>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [showDueWords, setShowDueWords] = useState(false);
+  const [isWordDialogueModalOpen, setIsWordDialogueModalOpen] = useState(false);
+  const [wordDialogueSelected, setWordDialogueSelected] = useState<Set<string>>(new Set());
+  const [wordDialogueTargetWords, setWordDialogueTargetWords] = useState<string[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [resumedMessages, setResumedMessages] = useState<ChatMessage[] | null>(null);
   const { user } = useAuth();
   const { speak, listen, isListening, cancel } = useSpeech();
 
@@ -554,7 +569,7 @@ export default function App() {
 
     if (user) {
       try {
-        await updateDoc(doc(db, 'words', wordId), {
+        await updateDoc(doc(db, 'users', user.uid, 'words', wordId), {
           masteryLevel: nextLevel,
           lastReviewedAt: Date.now()
         });
@@ -587,7 +602,16 @@ export default function App() {
     else setSelectedWordIds(new Set(words.map(w => w.id)));
   };
 
-  // Logic to generate podcast
+  const toggleWordDialogueSelection = (id: string) => {
+    setWordDialogueSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 5) next.add(id);
+      return next;
+    });
+  };
+
+  // Logic to generate gossip article
   const handleGeneratePodcast = async () => {
     const targetWords = words.filter(w => selectedWordIds.has(w.id)).map(w => w.text);
     if (targetWords.length === 0) return;
@@ -595,11 +619,39 @@ export default function App() {
     setIsLoading(true);
     setReturnTab('book');
     setMode('podcast');
-    const data = await generatePodcastDialogue(targetWords);
-    if (data) setPodcastData(data);
+    setPodcastData(null);
+    setIsSelectionMode(false);
+    setSelectedWordIds(new Set());
+    try {
+      const data = await generatePodcastDialogue(targetWords);
+      if (data && data.lines) {
+        setPodcastData(data);
+      } else {
+        setMode('normal');
+      }
+    } catch (e) {
+      console.error("Generation error:", e);
+      setMode('normal');
+    }
     setIsLoading(false);
-    setIsSelectionMode(false); 
-    setSelectedWordIds(new Set()); 
+  };
+
+  const handleRegeneratePodcast = async () => {
+    if (learningWords.length === 0) return;
+    setIsLoading(true);
+    setPodcastData(null);
+    try {
+      const data = await generatePodcastDialogue(learningWords);
+      if (data && data.lines) {
+        setPodcastData(data);
+      } else {
+        setMode('normal');
+      }
+    } catch (e) {
+      console.error("Regeneration error:", e);
+      setMode('normal');
+    }
+    setIsLoading(false);
   };
 
   const handleStartSelection = () => {
@@ -607,9 +659,48 @@ export default function App() {
     setSelectedWordIds(new Set());
   };
 
+  const handleStartWordDialogue = () => {
+    const selectedWords = words.filter(w => wordDialogueSelected.has(w.id)).map(w => w.text);
+    if (selectedWords.length === 0 || selectedWords.length > 5) return;
+
+    setIsWordDialogueModalOpen(false);
+    setWordDialogueSelected(new Set());
+    setWordDialogueTargetWords(selectedWords);
+
+    const wordList = selectedWords.join(', ');
+    const scenario: Scenario = {
+      id: `word-dialogue-${Date.now()}`,
+      title: `词汇练习: ${selectedWords.slice(0, 3).join(', ')}${selectedWords.length > 3 ? '...' : ''}`,
+      description: `围绕 ${selectedWords.length} 个核心词汇的对话练习`,
+      category: 'Workplace',
+      systemPrompt: `你现在是一个口语教练。用户选择了以下核心词汇：[${wordList}]。
+请根据这些单词自动推断一个合理的职场或生活场景，并开启对话。
+在对话中，你必须主动使用这些单词，并引导或鼓励用户也在回复中尝试使用它们。
+单词出现时请在对话中加粗（用 **word** 格式）。
+每次回复后给出简短正向反馈，鼓励用户继续使用目标词汇。`,
+      initialMessage: `Let's practice! I've prepared a conversation for you around these words: **${wordList}**. Ready to begin?`
+    };
+
+    setSelectedScenario(scenario);
+  };
+
   const handleCancelSelection = () => {
     setIsSelectionMode(false);
     setSelectedWordIds(new Set());
+  };
+
+  const resumeSession = (session: ChatSession) => {
+    const found = scenarios.find(s => s.id === session.scenarioId) || {
+      id: session.scenarioId,
+      title: session.title,
+      description: '',
+      category: 'Other' as Category,
+      systemPrompt: 'Continue the conversation naturally.',
+      initialMessage: '',
+    };
+    setSelectedScenario(found);
+    setResumedMessages(session.messages);
+    setWordDialogueTargetWords(session.targetWords || []);
   };
 
   useEffect(() => {
@@ -635,7 +726,7 @@ export default function App() {
             localWords.forEach(lw => {
               if (!cloudWords.find(cw => cw.id === lw.id)) {
                 const wordWithUser = { ...lw, userId: user.uid };
-                const wordRef = doc(db, 'words', lw.id);
+                const wordRef = doc(db, 'users', user.uid, 'words', lw.id);
                 batch.set(wordRef, wordWithUser);
                 merged.push(wordWithUser);
                 migrationCount++;
@@ -646,9 +737,9 @@ export default function App() {
               await batch.commit();
               localStorage.removeItem('lexiloop_words');
             }
-            setWords(merged);
+            setWords(dedupWords(merged));
           } else {
-            setWords(cloudWords);
+            setWords(dedupWords(cloudWords));
           }
 
           // Load Scenarios
@@ -680,6 +771,17 @@ export default function App() {
             setScenarios([...DEFAULT_SCENARIOS, ...cloudScenarios]);
           }
 
+          // Load Chat Sessions (deduplicate by scenarioId, keep latest)
+          const sessionsQuery = query(collection(db, "users", user.uid, "chat_sessions"));
+          const sessionsSnap = await getDocs(sessionsQuery);
+          const allSessions = sessionsSnap.docs.map(d => d.data() as ChatSession);
+          const sessionMap = new Map<string, ChatSession>();
+          allSessions.forEach(s => {
+            const existing = sessionMap.get(s.scenarioId);
+            if (!existing || s.updatedAt > existing.updatedAt) sessionMap.set(s.scenarioId, s);
+          });
+          setChatSessions(Array.from(sessionMap.values()).sort((a, b) => b.updatedAt - a.updatedAt));
+
         } catch (e) {
           console.error("Error loading user data:", e);
         } finally {
@@ -688,11 +790,16 @@ export default function App() {
       } else {
         // Fallback to local
         const stored = localStorage.getItem('lexiloop_words');
-        if (stored) setWords(JSON.parse(stored));
+        if (stored) setWords(dedupWords(JSON.parse(stored)));
         
         const storedScenarios = localStorage.getItem('lexiloop_scenarios');
         if (storedScenarios) {
           setScenarios([...DEFAULT_SCENARIOS, ...JSON.parse(storedScenarios)]);
+        }
+
+        const storedSessions = localStorage.getItem('lexiloop_chat_sessions');
+        if (storedSessions) {
+          setChatSessions(JSON.parse(storedSessions));
         }
       }
     };
@@ -700,10 +807,43 @@ export default function App() {
     loadData();
   }, [user]);
 
-  const saveWords = async (newWords: Word[]) => {
-    setWords(newWords);
-    if (!user) {
-      localStorage.setItem('lexiloop_words', JSON.stringify(newWords));
+  // Deduplicate words: same text on the same day, keep only the latest
+  const dedupWords = (raw: Word[]): Word[] => {
+    const map = new Map<string, Word>();
+    for (const w of raw) {
+      const day = new Date(w.createdAt).toLocaleDateString('en-CA'); // YYYY-MM-DD
+      const key = `${day}_${w.text.toLowerCase()}`;
+      const existing = map.get(key);
+      if (!existing || w.createdAt > existing.createdAt) {
+        map.set(key, w);
+      }
+    }
+    return Array.from(map.values());
+  };
+
+  const saveWords = (newWordsOrFn: Word[] | ((prev: Word[]) => Word[])) => {
+    if (typeof newWordsOrFn === 'function') {
+      setWords(prev => {
+        const next = newWordsOrFn(prev);
+        if (!user) localStorage.setItem('lexiloop_words', JSON.stringify(next));
+        return next;
+      });
+    } else {
+      setWords(newWordsOrFn);
+      if (!user) localStorage.setItem('lexiloop_words', JSON.stringify(newWordsOrFn));
+    }
+  };
+
+  const saveChatSessions = (updater: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => {
+    if (typeof updater === 'function') {
+      setChatSessions(prev => {
+        const next = updater(prev);
+        if (!user) localStorage.setItem('lexiloop_chat_sessions', JSON.stringify(next));
+        return next;
+      });
+    } else {
+      setChatSessions(updater);
+      if (!user) localStorage.setItem('lexiloop_chat_sessions', JSON.stringify(updater));
     }
   };
 
@@ -711,7 +851,7 @@ export default function App() {
     const customOnly = scenarios.filter(s => !DEFAULT_SCENARIOS.find(ds => ds.id === s.id));
     const nextCustom = [newScenario, ...customOnly];
     setScenarios([...DEFAULT_SCENARIOS, ...nextCustom]);
-    
+
     if (user) {
       try {
         await setDoc(doc(db, 'scenarios', newScenario.id), { ...newScenario, userId: user.uid });
@@ -721,47 +861,75 @@ export default function App() {
     } else {
       localStorage.setItem('lexiloop_scenarios', JSON.stringify(nextCustom));
     }
-    
+
     setIsAddingScenario(false);
     setScenarioMode('selection');
+    setSelectedScenario(newScenario);
   };
 
-  const handleAddWord = async (text: string) => {
+  const handleAddWord = async (text: string, skipClose?: boolean) => {
     if (!text) return;
     setIsLoading(true);
     try {
       const details = await generateWordDetails(text);
       if (details) {
-        const isDuplicate = words.some(w => w.text.toLowerCase() === text.toLowerCase());
-        if (!isDuplicate) {
-          const newWord: Word = {
-            id: crypto.randomUUID(),
-            text,
-            ukPhonetic: details.ukPhonetic,
-            usPhonetic: details.usPhonetic,
-            pos: details.pos,
-            definition: details.definition,
-            examples: details.examples,
-            collocations: details.collocations,
-            category: 'Workplace',
-            createdAt: Date.now(),
-            masteryLevel: 0,
-            tags: []
-          };
+        const newWord: Word = {
+          id: crypto.randomUUID(),
+          text,
+          ukPhonetic: details.ukPhonetic,
+          usPhonetic: details.usPhonetic,
+          pos: details.pos,
+          definition: details.definition,
+          examples: details.examples,
+          collocations: details.collocations,
+          category: 'Workplace',
+          createdAt: Date.now(),
+          masteryLevel: 0,
+          tags: []
+        };
 
-          if (user) {
-            await setDoc(doc(db, 'users', user.uid, 'words', newWord.id), { ...newWord });
-          }
-          saveWords([newWord, ...words]);
+        if (user) {
+          await setDoc(doc(db, 'users', user.uid, 'words', newWord.id), { ...newWord });
         }
+        saveWords(prev => {
+          if (prev.some(w => w.text.toLowerCase() === text.toLowerCase())) return prev;
+          return [newWord, ...prev];
+        });
       }
     } catch (e) {
       console.error("Error adding word:", e);
     } finally {
       setIsLoading(false);
+      if (!skipClose) {
+        setIsAddingWord(false);
+        setNewWordInput('');
+      }
+    }
+  };
+
+  const handleBatchAdd = async (input: string) => {
+    const normalized = [...new Set(
+      input.split(/[,，\n;；\s]+/).map(w => w.trim()).filter(Boolean)
+    )];
+    const newWords = normalized.filter(
+      w => !words.some(ew => ew.text.toLowerCase() === w.toLowerCase())
+    );
+    if (newWords.length === 0) {
       setIsAddingWord(false);
       setNewWordInput('');
+      return;
     }
+
+    setBatchProgress({ total: newWords.length, done: 0 });
+
+    for (let i = 0; i < newWords.length; i++) {
+      await handleAddWord(newWords[i], true);
+      setBatchProgress({ total: newWords.length, done: i + 1 });
+    }
+
+    setBatchProgress(null);
+    setIsAddingWord(false);
+    setNewWordInput('');
   };
 
   const handleRefreshWord = async (id: string, text: string) => {
@@ -780,7 +948,7 @@ export default function App() {
       
       if (user) {
         try {
-          await updateDoc(doc(db, 'words', id), {
+          await updateDoc(doc(db, 'users', user.uid, 'words', id), {
             ukPhonetic: details.ukPhonetic,
             usPhonetic: details.usPhonetic,
             pos: details.pos,
@@ -798,17 +966,14 @@ export default function App() {
   };
 
   const handleDeleteWord = async (id: string) => {
-    const nextWords = words.filter(w => w.id !== id);
-    setWords(nextWords);
-    
+    saveWords(prev => prev.filter(w => w.id !== id));
+
     if (user) {
       try {
-        await deleteDoc(doc(db, 'words', id));
+        await deleteDoc(doc(db, 'users', user.uid, 'words', id));
       } catch (e) {
         console.error(e);
       }
-    } else {
-      localStorage.setItem('lexiloop_words', JSON.stringify(nextWords));
     }
 
     if (selectedWordIds.has(id)) {
@@ -819,78 +984,72 @@ export default function App() {
   };
 
   const handleInspect = async (word: string) => {
-    setIsLoading(true);
+    setIsInspecting(true);
     const details = await generateWordDetails(word);
     if (details) {
       setInspectedWord({ text: word, details });
     }
-    setIsLoading(false);
+    setIsInspecting(false);
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans">
-      {/* Side/Bottom Nav */}
-      <nav className="fixed left-0 lg:top-0 bottom-0 lg:h-full w-full lg:w-20 bg-white border-t lg:border-t-0 lg:border-r border-gray-100 flex lg:flex-col items-center py-4 lg:py-8 z-50 shadow-lg lg:shadow-sm">
-        <div className="hidden lg:block mb-12">
-          <div className="w-11 h-11 bg-blue-600 rounded-[14px] flex items-center justify-center text-white font-bold text-xl shadow-lg">L</div>
+    <div className="min-h-screen bg-slate-200 text-slate-900 font-sans flex items-start justify-center">
+      {/* Phone Container */}
+      <div className="w-full min-h-dvh lg:max-w-[430px] lg:min-h-[calc(100vh-60px)] lg:my-[30px] bg-[#F2F2F7] lg:rounded-[40px] lg:shadow-[0_20px_60px_rgba(0,0,0,0.12)] lg:border lg:border-gray-200/50 flex flex-col lg:max-h-[calc(100vh-60px)] relative lg:overflow-hidden">
+
+      {/* Top Nav (desktop) / Bottom Nav (mobile) */}
+      <nav className="fixed bottom-0 lg:static lg:bottom-auto w-full lg:w-full bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-b border-black/[0.04] flex items-center justify-around lg:justify-start py-2 lg:py-0 lg:px-5 z-50 lg:h-14 lg:shrink-0">
+        {/* Desktop: Logo (left side) — order-first on lg */}
+        <div className="hidden lg:flex items-center gap-2.5 mr-4 lg:order-first">
+          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm">L</div>
+          <span className="font-bold text-base tracking-tight text-slate-900">LexiLoop</span>
         </div>
-        <div className="flex lg:flex-col items-center justify-around lg:justify-start w-full lg:w-auto gap-2 lg:gap-6 flex-1 px-4 lg:px-0">
-          <NavIcon icon={<BookOpen size={22} />} active={activeTab === 'book'} onClick={() => { setActiveTab('book'); setMode('normal'); }} label="首页" />
-          <NavIcon icon={<Headphones size={22} />} active={activeTab === 'review'} onClick={() => { setActiveTab('review'); setMode('normal'); }} label="复习" />
-          <NavIcon icon={<MessageSquare size={22} />} active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setMode('normal'); }} label="对话" />
-          
-          <div className="lg:hidden flex items-center justify-center w-12 h-12">
-            {user ? (
-               <button onClick={handleLogout} className="text-gray-300 hover:text-red-500 p-2">
-                 <LogOut size={22} />
-               </button>
-            ) : (
-                <button onClick={handleLogin} className="text-gray-400 p-2">
-                  <LogIn size={22} />
-                </button>
-            )}
-          </div>
+
+        {/* Mobile: Logo in bottom bar */}
+        <div className="flex lg:hidden items-center gap-1.5">
+          <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-[10px]">L</div>
+          <span className="font-bold text-[10px] tracking-tight text-slate-900">LexiLoop</span>
         </div>
-        
-        <div className="hidden lg:flex mt-auto border-t border-gray-100 w-full pt-8 flex-col items-center gap-6">
+
+        <NavIcon icon={<BookOpen size={20} />} active={activeTab === 'book'} onClick={() => { setActiveTab('book'); setMode('normal'); }} label="生词本" />
+        <NavIcon icon={<MessageSquare size={20} />} active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setMode('normal'); }} label="对话练习" />
+        <NavIcon icon={<Headphones size={20} />} active={activeTab === 'review'} onClick={() => { setActiveTab('review'); setMode('normal'); }} label="背单词" />
+
+        {/* User Avatar / Login button */}
+        <div className="flex items-center justify-center">
           {user ? (
-            <>
-              <div className="w-10 h-10 rounded-full border-2 border-gray-100 overflow-hidden shadow-sm">
-                <img src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} referrerPolicy="no-referrer" alt="Avatar" />
-              </div>
-              <button onClick={handleLogout} className="text-gray-300 hover:text-red-500 transition-colors">
-                <LogOut size={20} />
-              </button>
-            </>
+            <button onClick={handleLogout} className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-slate-200 hover:ring-blue-300 transition-all">
+              <img src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} referrerPolicy="no-referrer" alt="Avatar" className="w-full h-full object-cover" />
+            </button>
           ) : (
-            <button onClick={handleLogin} className="w-12 h-12 rounded-2xl bg-gray-50 text-gray-400 flex items-center justify-center hover:bg-gray-100 hover:text-black transition-all">
-              <LogIn size={20} />
+            <button onClick={handleLogin} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-400 transition-all">
+              <UserIcon size={16} />
             </button>
           )}
         </div>
       </nav>
 
       {/* Main Container */}
-      <main className="lg:pl-20 pb-24 lg:pb-0 min-h-screen">
-        <div className="max-w-6xl mx-auto px-6 lg:px-10 py-8 lg:py-10">
+      <main className="pb-20 lg:pb-4 flex-1 overflow-y-auto">
+        <div className="mx-auto px-5 lg:px-6 py-6">
           
-          <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-10">
+          <header className="flex items-center justify-between gap-3 mb-6">
             <div>
-              <h1 className="text-3xl font-extrabold tracking-tight font-serif uppercase">
-                {activeTab === 'book' && (mode === 'flashcard' ? "Immersion Flashcards" : mode === 'podcast' ? "Listening Podcast" : "首页 (生词本)")}
-                {activeTab === 'review' && "背单词 (针对性复习)"}
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                {activeTab === 'book' && (mode === 'flashcard' ? "Immersion Flashcards" : mode === 'podcast' ? "知识进到脑子里" : "生词本")}
+                {activeTab === 'review' && "背单词"}
                 {activeTab === 'chat' && (selectedScenario ? selectedScenario.title : "对话练习")}
               </h1>
-              <p className="text-gray-400 mt-1 font-medium text-xs uppercase tracking-widest">
+              <p className="text-slate-500 mt-1 font-medium text-sm">
                 {activeTab === 'book' && (mode === 'normal' ? `${words.length} items logged` : "Refining through synthesis")}
                 {activeTab === 'review' && "科学记忆曲线驱动"}
                 {activeTab === 'chat' && "AI-enhanced professional practice"}
               </p>
             </div>
-            
+
             {mode !== 'normal' && (
-               <button onClick={handleExitMode} className="text-gray-400 hover:text-black font-bold text-sm flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-gray-100 shadow-sm transition-all hover:shadow-md">
-                 <ChevronLeft size={18} /> 返回
+               <button onClick={handleExitMode} className="text-slate-500 hover:text-slate-900 font-semibold text-sm flex items-center gap-1 bg-white px-4 py-2 rounded-full shadow-[0_2px_12px_rgb(0,0,0,0.04)] transition-all shrink-0">
+                 <ChevronLeft size={14} /> 返回
                </button>
             )}
 
@@ -898,50 +1057,50 @@ export default function App() {
 
           <AnimatePresence mode="wait">
             {activeTab === 'book' && mode === 'normal' && (
-              <motion.div key="book-root" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-8">
+              <motion.div key="book-root" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
                 {/* Top Action Row */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-2 gap-3">
                   {/* Left Card: Add Word */}
-                  <div 
+                  <div
                     onClick={() => setIsAddingWord(true)}
-                    className="bg-white border border-gray-100 p-10 rounded-[40px] shadow-2xl shadow-gray-100/50 flex flex-col items-center justify-center text-center space-y-6 cursor-pointer hover:scale-[1.02] transition-all group"
+                    className="bg-white p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center justify-center text-center space-y-3 cursor-pointer active:scale-[0.97] transition-all group"
                   >
-                    <div className="w-16 h-16 bg-blue-600 text-white rounded-3xl flex items-center justify-center shadow-xl shadow-blue-100 group-hover:rotate-12 transition-transform">
-                      <Plus size={32} />
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Plus size={24} />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold">录入/上传生词</h3>
-                      <p className="text-gray-400 text-sm mt-1">快捷录入职场表达</p>
+                      <h3 className="text-base font-semibold text-slate-900">录入生词</h3>
+                      <p className="text-slate-500 text-sm mt-0.5">快捷录入表达</p>
                     </div>
                   </div>
 
-                  {/* Right Card: Generate Podcast */}
-                  <div 
+                  {/* Right Card: Generate Gossip Story */}
+                  <div
                     onClick={isSelectionMode ? undefined : handleStartSelection}
                     className={cn(
-                      "p-10 rounded-[40px] border-2 flex flex-col items-center justify-center text-center space-y-6 transition-all duration-500",
-                      isSelectionMode 
-                        ? "bg-blue-50 border-blue-200 shadow-inner" 
-                        : selectedWordIds.size > 0 
-                          ? "bg-emerald-50/50 border-emerald-100 cursor-pointer shadow-xl" 
-                          : "bg-white border-gray-100 hover:border-blue-200 cursor-pointer shadow-2xl shadow-gray-100/50 hover:scale-[1.02]"
+                      "p-5 rounded-3xl border-2 flex flex-col items-center justify-center text-center space-y-3 transition-all duration-500",
+                      isSelectionMode
+                        ? "bg-blue-50 border-blue-200"
+                        : selectedWordIds.size > 0
+                          ? "bg-emerald-50/50 border-emerald-100 cursor-pointer shadow-xl"
+                          : "bg-white border-slate-200/60 hover:border-blue-300 cursor-pointer shadow-[0_8px_30px_rgb(0,0,0,0.04)] active:scale-[0.97]"
                     )}
                   >
                     <div className={cn(
-                      "w-16 h-16 rounded-3xl flex items-center justify-center transition-all duration-500 shadow-lg",
+                      "w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500",
                       isSelectionMode ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-400 group-hover:scale-110"
                     )}>
-                      {isSelectionMode ? <Check size={32} /> : <Headphones size={32} />}
+                      {isSelectionMode ? <Check size={24} /> : <FileText size={24} />}
                     </div>
-                    
+
                     <div>
-                      <h3 className="text-xl font-bold">
-                        {isSelectionMode ? "请勾选单词" : "生成场景对话"}
+                      <h3 className="text-sm font-bold">
+                        {isSelectionMode ? "勾选单词" : "情景化阅读"}
                       </h3>
-                      <p className="text-gray-400 text-sm mt-1">
-                        {isSelectionMode 
-                          ? `已选中 ${selectedWordIds.size} 个词`
-                          : "基于词汇模拟地道表达"}
+                      <p className="text-gray-400 text-[10px] mt-0.5">
+                        {isSelectionMode
+                          ? `已选 ${selectedWordIds.size} 个词`
+                          : "趣味阅读加深记忆"}
                       </p>
                     </div>
 
@@ -949,7 +1108,7 @@ export default function App() {
                       <div className="flex gap-3 w-full pt-2">
                         <button 
                           onClick={(e) => { e.stopPropagation(); handleCancelSelection(); }}
-                          className="flex-1 py-3 rounded-2xl font-bold bg-white border border-gray-200 text-gray-400 hover:bg-gray-50 transition-all text-xs"
+                          className="flex-1 py-3 rounded-full font-semibold bg-white text-slate-500 hover:bg-slate-50 transition-all text-sm"
                         >
                           取消
                         </button>
@@ -957,10 +1116,10 @@ export default function App() {
                           onClick={(e) => { e.stopPropagation(); handleGeneratePodcast(); }}
                           disabled={selectedWordIds.size === 0 || isLoading}
                           className={cn(
-                            "flex-[2] py-3 rounded-2xl font-bold transition-all shadow-lg flex items-center justify-center gap-2 text-xs",
+                            "flex-[2] py-3 rounded-full font-semibold transition-all flex items-center justify-center gap-2 text-sm",
                             selectedWordIds.size > 0 
-                              ? "bg-blue-600 text-white shadow-blue-100" 
-                              : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                              ? "bg-blue-600 text-white" 
+                              : "bg-slate-200 text-slate-400 cursor-not-allowed"
                           )}
                         >
                           {isLoading ? <RotateCcw className="animate-spin" size={14} /> : <Sparkles size={14} />}
@@ -972,32 +1131,33 @@ export default function App() {
                 </div>
 
                 {/* Word List Area */}
-                <div className="space-y-10">
+                <div className="space-y-5">
                   {words.length === 0 ? (
-                    <div className="bg-white border border-gray-100 rounded-[40px] p-20 text-center text-gray-300 shadow-sm">
-                      <BookOpen size={64} className="mx-auto mb-6 opacity-20" />
-                      <p className="text-lg font-bold">Your Archive is Waiting</p>
-                      <p className="text-sm mt-2">Start adding words from chat or manual entry.</p>
+                    <div className="bg-white rounded-3xl p-10 text-center text-slate-400 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+                      <BookOpen size={40} className="mx-auto mb-4 opacity-20" />
+                      <p className="text-sm font-bold">Your Archive is Waiting</p>
+                      <p className="text-[10px] mt-1">Start adding words from chat or manual entry.</p>
                     </div>
                   ) : (
                     Object.entries(
-                      words.reduce((acc, word) => {
+                      [...words].sort((a, b) => b.createdAt - a.createdAt).reduce((acc, word) => {
                         const date = new Date(word.createdAt).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
                         if (!acc[date]) acc[date] = [];
                         acc[date].push(word);
                         return acc;
                       }, {} as Record<string, Word[]>)
                     )
-                    .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime())
-                    .map(([date, group]: [string, Word[]]) => (
-                      <div key={date} className="space-y-4">
-                        <div className="flex items-center gap-4 px-6">
-                          <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-300">{date}</span>
+                    .map(([date, group]: [string, Word[]]) => {
+                      const sortedGroup = [...group].sort((a, b) => b.createdAt - a.createdAt);
+                      return (
+                      <div key={date} className="space-y-3">
+                        <div className="flex items-center gap-3 px-1">
+                          <span className="text-xs font-semibold text-slate-400">{date}</span>
                           <div className="h-px bg-gray-100 flex-1" />
                         </div>
 
-                        <div className="bg-white border border-gray-100 rounded-[40px] overflow-hidden p-6 shadow-xl shadow-gray-100/50 space-y-2">
-                          {group.map(w => (
+                        <div className="bg-white rounded-3xl overflow-hidden p-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-1">
+                          {sortedGroup.map(w => (
                             <WordRow 
                               key={w.id} 
                               word={w} 
@@ -1012,7 +1172,8 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                    ))
+                    );
+                    })
                   )}
                 </div>
               </motion.div>
@@ -1046,70 +1207,123 @@ export default function App() {
             )}
 
             {activeTab === 'book' && mode === 'podcast' && (
-              <PodcastView 
+              <PodcastView
                 data={podcastData}
-                loading={isLoading} 
-                key="pod-view" 
-                onSpeak={speak} 
+                loading={isLoading}
+                key="pod-view"
+                onSpeak={speak}
                 onStop={cancel}
                 onFinish={handleExitMode}
-                highlightWords={learningWords}
+                onRegenerate={handleRegeneratePodcast}
                 onInspect={handleInspect}
+                highlightWords={learningWords}
+                isInspecting={isInspecting}
               />
             )}
 
             {activeTab === 'chat' && (
               <AnimatePresence mode="wait">
                 {!selectedScenario ? (
-                  <motion.div key="chat-root" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-12">
-                    {/* Manual Create Section */}
-                    <div className="bg-white border border-gray-100 rounded-[40px] p-10 shadow-2xl relative overflow-hidden group">
-                      <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-50/50 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl -z-10" />
-                      <div className="flex items-center justify-between">
-                         <div className="space-y-4 max-w-lg">
-                            <h2 className="text-3xl font-bold">手动创建对话</h2>
-                            <p className="text-gray-400 text-sm">自定义场景、角色与目标。无论是模拟面试、客户会议还是日常闲聊，由你来定义规则。</p>
-                            <button 
-                              onClick={() => { setIsAddingScenario(true); setScenarioMode('selection'); }}
-                              className="bg-gray-900 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 hover:bg-black transition-all hover:scale-105 active:scale-95"
-                            >
-                              <Plus size={20} />
-                              立即创建
-                            </button>
-                         </div>
-                         <div className="hidden md:flex w-40 h-40 bg-emerald-50 rounded-[40px] items-center justify-center text-emerald-600 shadow-inner group-hover:rotate-6 transition-transform">
-                            <MessageSquare size={80} />
-                         </div>
+                  <motion.div key="chat-root" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-6">
+                    {/* Two Entry Cards — side by side */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div
+                        onClick={() => setIsWordDialogueModalOpen(true)}
+                        className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden cursor-pointer active:scale-[0.97] transition-all"
+                      >
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center">
+                              <Lightbulb size={16} className="text-amber-600" />
+                            </div>
+                          </div>
+                          <h2 className="text-base font-semibold text-slate-900 leading-tight">生词本专项练习</h2>
+                          <p className="text-slate-500 text-sm leading-relaxed line-clamp-2">选 1-5 个单词，AI 定制对话场景</p>
+                        </div>
+                      </div>
+
+                      <div
+                        onClick={() => { setIsAddingScenario(true); setScenarioMode('selection'); }}
+                        className="bg-white rounded-3xl p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden cursor-pointer active:scale-[0.97] transition-all"
+                      >
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                              <Plus size={16} className="text-gray-600" />
+                            </div>
+                          </div>
+                          <h2 className="text-base font-semibold text-slate-900 leading-tight">手动创建对话</h2>
+                          <p className="text-slate-500 text-sm leading-relaxed line-clamp-2">自定义场景与角色，模拟真实对话</p>
+                        </div>
                       </div>
                     </div>
 
                     {/* Categories and Grid */}
-                    <div className="space-y-8">
-                       <div className="space-y-6 border-b border-gray-100 pb-8">
-                          <h3 className="text-2xl font-bold flex items-center gap-3">
-                            <Sparkles className="text-blue-600" />
+                    <div className="space-y-4">
+                       <div className="space-y-3 pb-4">
+                          <h3 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                            <Sparkles className="text-blue-600" size={18} />
                             推荐话题
                           </h3>
                           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                             {['All', 'Workplace', 'Shopping', 'Daily', 'Travel', 'Other'].map(cat => (
-                               <button 
-                                 key={cat} 
+                             {(() => {
+                               const hasHistory = chatSessions.length > 0 || scenarios.some(s => !DEFAULT_SCENARIOS.some(ds => ds.id === s.id));
+                               const cats = hasHistory
+                                 ? ['History', 'Workplace', 'Shopping', 'Daily', 'Travel', 'Other']
+                                 : ['Workplace', 'Shopping', 'Daily', 'Travel', 'Other'];
+                               if (!hasHistory && selectedCategory === 'History') {
+                                 setSelectedCategory('Workplace');
+                               }
+                               return cats.map(cat => (
+                               <button
+                                 key={cat}
                                  onClick={() => setSelectedCategory(cat)}
                                  className={cn(
-                                   "px-6 py-2 rounded-xl border text-xs font-bold whitespace-nowrap transition-all shadow-sm",
-                                   selectedCategory === cat 
-                                     ? "bg-blue-600 border-blue-600 text-white" 
-                                     : "bg-white border-gray-100 text-gray-500 hover:bg-gray-50"
+                                   "px-4 py-1.5 rounded-full text-sm font-semibold whitespace-nowrap transition-all",
+                                   selectedCategory === cat
+                                     ? "bg-blue-600 text-white"
+                                     : "bg-white text-slate-500 hover:bg-slate-50"
                                  )}
                                >
                                  {cat}
                                </button>
-                             ))}
+                             ));
+                             })()}
                           </div>
                        </div>
 
-                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                         {[...scenarios]
+                       <div className="grid grid-cols-2 gap-3">
+                         {selectedCategory === 'History' ? (
+                           (() => {
+                             const customScenarios = scenarios.filter(s => !DEFAULT_SCENARIOS.some(ds => ds.id === s.id));
+                             const allItems = [
+                               ...chatSessions.map(s => ({ type: 'session' as const, data: s })),
+                               ...customScenarios.map(s => ({ type: 'scenario' as const, data: s })),
+                             ];
+                             return allItems.length === 0 ? (
+                               <div className="text-center py-10 text-slate-400 text-sm">暂无对话历史</div>
+                             ) : (
+                               allItems.map(({ type, data }) => (
+                                 <HistoryCard
+                                   key={data.id}
+                                   type={type}
+                                   data={data}
+                                   onResume={resumeSession}
+                                   onSelect={setSelectedScenario}
+                                   onDeleteSession={(id) => {
+                                     saveChatSessions(prev => prev.filter(s => s.id !== id));
+                                     if (user) deleteDoc(doc(db, 'users', user.uid, 'chat_sessions', id)).catch(() => {});
+                                   }}
+                                   onDeleteScenario={(id) => {
+                                     const nextCustom = scenarios.filter(s => !DEFAULT_SCENARIOS.some(ds => ds.id === s.id) && s.id !== id);
+                                     setScenarios([...DEFAULT_SCENARIOS, ...nextCustom]);
+                                   }}
+                                 />
+                               ))
+                             );
+                           })()
+                         ) : (
+                         [...scenarios]
                            .sort((a, b) => {
                              const aIsDefault = DEFAULT_SCENARIOS.some(ds => ds.id === a.id);
                              const bIsDefault = DEFAULT_SCENARIOS.some(ds => ds.id === b.id);
@@ -1117,49 +1331,81 @@ export default function App() {
                              if (aIsDefault && !bIsDefault) return 1;
                              return 0;
                            })
-                           .filter(s => selectedCategory === 'All' || s.category === selectedCategory)
+                           .filter(s => s.category === selectedCategory)
                            .map(s => <ScenarioCard key={s.id} scenario={s} onClick={() => setSelectedScenario(s)} />)
+                         )
                          }
                        </div>
                     </div>
                   </motion.div>
                 ) : (
-                  <ChatInterface scenario={selectedScenario} onBack={() => setSelectedScenario(null)} onAddWord={handleAddWord} />
+                  <ChatInterface scenario={selectedScenario} onBack={(msgs) => {
+                    try {
+                      if (msgs && msgs.length > 1) {
+                        const session: ChatSession = {
+                          id: `session-${selectedScenario.id}-${Date.now()}`,
+                          scenarioId: selectedScenario.id,
+                          title: selectedScenario.title,
+                          messages: msgs,
+                          targetWords: wordDialogueTargetWords.length > 0 ? wordDialogueTargetWords : undefined,
+                          updatedAt: Date.now(),
+                        };
+                        saveChatSessions(prev => [session, ...prev.filter(s => s.scenarioId !== session.scenarioId)]);
+                        if (user) {
+                          const prevSessions = chatSessions;
+                          setDoc(doc(db, 'users', user.uid, 'chat_sessions', session.id), { ...session, userId: user.uid }).catch(console.error);
+                          // Delete old sessions for the same scenario
+                          prevSessions.filter(s => s.scenarioId === session.scenarioId).forEach(s => {
+                            deleteDoc(doc(db, 'users', user.uid, 'chat_sessions', s.id)).catch(() => {});
+                          });
+                        }
+                      }
+                    } catch (e) {
+                      console.error('Failed to save chat session:', e);
+                    }
+                    setSelectedScenario(null);
+                    setWordDialogueTargetWords([]);
+                    setResumedMessages(null);
+                  }} onAddWord={handleAddWord} targetWords={wordDialogueTargetWords.length > 0 ? wordDialogueTargetWords : undefined} initialMessages={resumedMessages || undefined} />
                 )}
               </AnimatePresence>
             )}
 
             {activeTab === 'review' && (
-              <motion.div key="review-root" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-12">
+              <motion.div key="review-root" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
                 {/* Stats Row */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white border border-gray-100 rounded-[40px] p-8 shadow-2xl shadow-gray-100/50 flex items-center gap-8 group">
-                    <div className="w-20 h-20 bg-amber-50 text-amber-500 rounded-[32px] flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
-                      <Clock size={40} />
+                <div className="grid grid-cols-2 gap-3">
+                  <div
+                    onClick={() => dueWords.length > 0 && setShowDueWords(true)}
+                    className={cn(
+                      "bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-4 group",
+                      dueWords.length > 0 && "cursor-pointer hover:border-amber-300 active:scale-[0.98] transition-all"
+                    )}
+                  >
+                    <div className="w-12 h-12 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                      <Clock size={24} />
                     </div>
-                    <div>
-                      <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">待复习单词列表</p>
-                      <h3 className="text-4xl font-black mt-1">{dueWords.length} <span className="text-lg font-bold text-gray-300">Tokens</span></h3>
-                      <p className="text-amber-600 text-[10px] font-bold mt-1 uppercase">根据艾宾浩斯曲线计算</p>
+                    <div className="min-w-0">
+                      <p className="text-slate-500 text-sm font-medium">待复习</p>
+                      <h3 className="text-3xl font-bold mt-0.5">{dueWords.length} <span className="text-sm text-slate-400">词</span></h3>
                     </div>
                   </div>
 
-                  <div className="bg-white border border-gray-100 rounded-[40px] p-8 shadow-2xl shadow-gray-100/50 flex items-center gap-8 group">
-                    <div className="w-20 h-20 bg-emerald-50 text-emerald-500 rounded-[32px] flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
-                      <Award size={40} />
+                  <div className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-4 group">
+                    <div className="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                      <Award size={24} />
                     </div>
-                    <div>
-                      <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">复习进度</p>
-                      <h3 className="text-4xl font-black mt-1">
+                    <div className="min-w-0">
+                      <p className="text-slate-500 text-sm font-medium">已掌握</p>
+                      <h3 className="text-3xl font-bold mt-0.5">
                         {words.filter(w => w.masteryLevel >= 6).length}/{words.length}
                       </h3>
-                      <p className="text-emerald-600 text-[10px] font-bold mt-1 uppercase">已掌握 / 总计词库</p>
                     </div>
                   </div>
                 </div>
 
                 {/* Training Modes Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-4">
                   <TrainingModule 
                       icon={<BookOpen size={32} />}
                       title="看中文回忆英文单词"
@@ -1213,24 +1459,283 @@ export default function App() {
         </div>
       </main>
 
+      {/* Word Dialogue Selection Modal */}
+      <AnimatePresence>
+        {isWordDialogueModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[120] flex items-end justify-center"
+            onClick={() => { setIsWordDialogueModalOpen(false); setWordDialogueSelected(new Set()); }}
+          >
+            <motion.div
+              initial={{ y: 300 }}
+              animate={{ y: 0 }}
+              exit={{ y: 300 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="w-full bg-white rounded-t-3xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="p-5 border-b border-black/[0.04]">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-xl text-slate-900">选择练习单词</h3>
+                  <button onClick={() => { setIsWordDialogueModalOpen(false); setWordDialogueSelected(new Set()); }} className="p-2 hover:bg-slate-100 rounded-xl">
+                    <X size={18} />
+                  </button>
+                </div>
+                <p className="text-blue-600 text-sm font-semibold">已选 {wordDialogueSelected.size}/5 个单词</p>
+              </div>
+
+              {/* Word List */}
+              <div className="flex-1 overflow-y-auto max-h-[50vh] p-3">
+                {words.length === 0 ? (
+                  <div className="p-10 text-center text-slate-400 text-sm">生词本暂无单词</div>
+                ) : (
+                  words.map(w => {
+                    const isSelected = wordDialogueSelected.has(w.id);
+                    const isFull = wordDialogueSelected.size >= 5 && !isSelected;
+                    return (
+                      <button
+                        key={w.id}
+                        onClick={() => !isFull && toggleWordDialogueSelection(w.id)}
+                        className={cn(
+                          "w-full flex items-center gap-3 p-3.5 rounded-2xl transition-all mb-1",
+                          isSelected ? "bg-blue-50" : isFull ? "opacity-30 cursor-not-allowed" : "hover:bg-slate-50"
+                        )}
+                      >
+                        <div className={cn(
+                          "w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-all",
+                          isSelected ? "bg-blue-600 text-white" : "border-2 border-slate-200"
+                        )}>
+                          {isSelected && <Check size={14} />}
+                        </div>
+                        <div className="flex-1 text-left min-w-0">
+                          <span className="font-bold text-sm">{w.text}</span>
+                          <span className="text-gray-300 text-xs ml-2">{w.pos}</span>
+                          <p className="text-slate-500 text-sm truncate">{w.definition}</p>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Bottom Action */}
+              <div className="p-5 border-t border-black/[0.04] flex gap-3">
+                <button
+                  onClick={() => { setIsWordDialogueModalOpen(false); setWordDialogueSelected(new Set()); }}
+                  className="flex-1 py-3.5 rounded-full font-semibold text-sm text-slate-500 hover:bg-slate-50 transition-all"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleStartWordDialogue}
+                  disabled={wordDialogueSelected.size === 0}
+                  className={cn(
+                    "flex-1 py-3.5 rounded-full font-semibold text-sm transition-all",
+                    wordDialogueSelected.size === 0
+                      ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                      : "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.97]"
+                  )}
+                >
+                  开始练习
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Due Words Bottom Sheet */}
+      <AnimatePresence>
+        {showDueWords && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/40 backdrop-blur-sm z-[120] flex items-end justify-center"
+            onClick={() => setShowDueWords(false)}
+          >
+            <motion.div
+              initial={{ y: 400 }}
+              animate={{ y: 0 }}
+              exit={{ y: 400 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="w-full bg-white rounded-t-3xl max-h-[55vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-black/[0.04] flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-xl text-slate-900">今日待复习</h3>
+                  <p className="text-slate-500 text-sm mt-0.5">{dueWords.length} 个单词</p>
+                </div>
+                <button onClick={() => setShowDueWords(false)} className="p-2 hover:bg-slate-100 rounded-xl">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3">
+                {dueWords.map(w => (
+                  <div key={w.id} className="flex items-center gap-3 p-3.5 rounded-2xl hover:bg-slate-50 transition-all">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-base text-slate-900">{w.text}</span>
+                        {w.pos && <span className="text-blue-600 font-semibold text-xs bg-blue-50 px-2 py-0.5 rounded-full">{w.pos}</span>}
+                      </div>
+                      <p className="text-slate-500 text-sm truncate">{w.definition}</p>
+                    </div>
+                    <div className="shrink-0">
+                      <div className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-semibold",
+                        w.masteryLevel === 0 ? "bg-red-50 text-red-400" :
+                        w.masteryLevel < 3 ? "bg-amber-50 text-amber-500" :
+                        "bg-emerald-50 text-emerald-500"
+                      )}>
+                        Lv.{w.masteryLevel}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Add Word Modal */}
       <AnimatePresence>
         {isAddingWord && (
-          <div className="fixed inset-0 bg-black/10 backdrop-blur-md z-[100] flex items-center justify-center p-6">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white max-w-xl w-full rounded-3xl p-8 relative shadow-2xl">
-              <button onClick={() => setIsAddingWord(false)} className="absolute top-6 right-6 text-gray-300"><X size={24} /></button>
-              <h3 className="text-2xl font-bold mb-8">Add to Loop</h3>
-              <input 
-                autoFocus value={newWordInput} onChange={e => setNewWordInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddWord(newWordInput)}
-                className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-4 px-6 text-xl font-bold focus:ring-4 focus:ring-blue-100"
-                placeholder="New word..." 
-              />
-              <button 
-                disabled={isLoading} onClick={() => handleAddWord(newWordInput)}
-                className="w-full bg-black text-white py-5 rounded-2xl mt-8 font-bold flex items-center justify-center gap-3"
+          <div className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[100] flex items-center justify-center p-6">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white w-full rounded-3xl p-6 relative shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
+              <button onClick={() => { setIsAddingWord(false); setNewWordInput(''); setAddWordTab('text'); setBatchProgress(null); }} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors"><X size={22} /></button>
+              <h3 className="text-xl font-semibold text-slate-900 mb-4">添加生词</h3>
+
+              {/* Tab Switcher */}
+              <div className="flex bg-slate-100 rounded-xl p-1 mb-4">
+                {(['text', 'voice', 'image'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setAddWordTab(tab)}
+                    className={cn(
+                      'flex-1 py-2 rounded-lg text-sm font-semibold transition-all',
+                      addWordTab === tab ? 'bg-white shadow-sm text-slate-900' : 'text-gray-400'
+                    )}
+                  >
+                    {tab === 'text' ? '文本' : tab === 'voice' ? '语音' : '图片'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Text Tab */}
+              {addWordTab === 'text' && (
+                <textarea
+                  autoFocus
+                  value={newWordInput}
+                  onChange={e => setNewWordInput(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl py-4 px-5 text-base font-semibold focus:ring-4 focus:ring-blue-100 resize-none min-h-[100px]"
+                  placeholder="输入单词，多个单词用换行或逗号分隔"
+                />
+              )}
+
+              {/* Voice Tab */}
+              {addWordTab === 'voice' && (
+                <div className="space-y-4">
+                  <div className="flex justify-center">
+                    <button
+                      onClick={() => {
+                        if (isListening) { cancel(); }
+                        else { listen((text) => setNewWordInput(prev => prev ? prev + ', ' + text : text)); }
+                      }}
+                      className={cn(
+                        'w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg',
+                        isListening
+                          ? 'bg-red-500 text-white shadow-red-200 animate-pulse'
+                          : 'bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.97]'
+                      )}
+                    >
+                      <Mic size={32} />
+                    </button>
+                  </div>
+                  <p className="text-center text-sm text-slate-500">
+                    {isListening ? '正在聆听...' : '点击麦克风说出单词'}
+                  </p>
+                  {newWordInput && (
+                    <textarea
+                      value={newWordInput}
+                      onChange={e => setNewWordInput(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl py-3 px-4 text-sm font-semibold focus:ring-4 focus:ring-blue-100 resize-none min-h-[60px]"
+                      placeholder="识别结果（可编辑）"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Image Tab */}
+              {addWordTab === 'image' && (
+                <div className="space-y-3">
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-300 rounded-2xl cursor-pointer hover:border-blue-300 hover:bg-blue-50/30 transition-all">
+                    <Upload size={24} className="text-slate-300 mb-2" />
+                    <span className="text-sm text-slate-400 font-semibold">点击上传图片</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (!files) return;
+                        // For now, extract text from filename or prompt user
+                        const names = Array.from(files).map(f => f.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '));
+                        setNewWordInput(prev => prev ? prev + '\n' + names.join('\n') : names.join('\n'));
+                      }}
+                    />
+                  </label>
+                  {newWordInput && (
+                    <textarea
+                      value={newWordInput}
+                      onChange={e => setNewWordInput(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl py-3 px-4 text-sm font-semibold focus:ring-4 focus:ring-blue-100 resize-none min-h-[60px]"
+                      placeholder="识别结果（可编辑）"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Progress Bar */}
+              {batchProgress && (
+                <div className="mt-4 space-y-2">
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                      style={{ width: `${(batchProgress.done / batchProgress.total) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-slate-500 text-center">
+                    正在处理 {batchProgress.done}/{batchProgress.total} 个单词...
+                  </p>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <button
+                disabled={isLoading || !newWordInput.trim() || !!batchProgress}
+                onClick={() => {
+                  const words = newWordInput.split(/[,，\n;；]+/).map(w => w.trim()).filter(Boolean);
+                  if (words.length === 1) {
+                    handleAddWord(words[0]);
+                  } else {
+                    handleBatchAdd(newWordInput);
+                  }
+                }}
+                className={cn(
+                  "w-full py-4 rounded-full mt-4 font-semibold flex items-center justify-center gap-3 transition-all",
+                  (isLoading || !newWordInput.trim() || !!batchProgress)
+                    ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                    : "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.97]"
+                )}
               >
-                {isLoading ? <div className="w-6 h-6 border-4 border-t-white rounded-full animate-spin" /> : "ARCHIVE"}
+                {isLoading || batchProgress ? <div className="w-5 h-5 border-4 border-t-white rounded-full animate-spin" /> : "添加"}
               </button>
             </motion.div>
           </div>
@@ -1240,31 +1745,31 @@ export default function App() {
       {/* Add Scenario Modal */}
       <AnimatePresence>
         {isAddingScenario && (
-          <div className="fixed inset-0 bg-black/30 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
-            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white max-w-2xl w-full rounded-[40px] p-10 relative shadow-2xl max-h-[90vh] overflow-y-auto">
-              <button onClick={() => { setIsAddingScenario(false); setScenarioMode('selection'); }} className="absolute top-8 right-8 text-gray-300 hover:text-black transition-colors"><X size={28} /></button>
-              
+          <div className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
+            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full rounded-3xl p-6 relative shadow-[0_20px_60px_rgba(0,0,0,0.12)] max-h-[90vh] overflow-y-auto">
+              <button onClick={() => { setIsAddingScenario(false); setScenarioMode('selection'); }} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"><X size={22} /></button>
+
               {scenarioMode === 'selection' && (
-                <div className="space-y-10 py-4">
+                <div className="space-y-5 py-2">
                   <div className="text-center">
-                    <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-50">
-                      <Plus size={32} />
+                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                      <Plus size={24} />
                     </div>
-                    <h3 className="text-3xl font-black mb-2">Create Scenario</h3>
-                    <p className="text-gray-400 font-medium">How do you want to define your simulation?</p>
+                    <h3 className="text-xl font-semibold text-slate-900 mb-1">Create Scenario</h3>
+                    <p className="text-slate-500 text-sm">How do you want to define your simulation?</p>
                   </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <button onClick={() => setScenarioMode('manual')} className="p-8 border-2 border-gray-100 rounded-[32px] text-left hover:border-blue-500 hover:bg-blue-50 transition-all group">
-                      <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-gray-50 group-hover:scale-110 transition-transform"><FileTextIcon size={24} className="text-blue-600" /></div>
-                      <h4 className="font-bold text-lg mb-1">Manual Entry</h4>
-                      <p className="text-gray-400 text-sm">Type name, roles, and instructions yourself.</p>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <button onClick={() => setScenarioMode('manual')} className="p-4 rounded-2xl text-left hover:bg-blue-50 transition-all group shadow-[0_2px_12px_rgb(0,0,0,0.03)] ring-1 ring-black/[0.03]">
+                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><FileText size={20} className="text-blue-600" /></div>
+                      <h4 className="font-semibold text-base text-slate-900 mb-0.5">Manual Entry</h4>
+                      <p className="text-slate-500 text-sm">Type name, roles, and instructions yourself.</p>
                     </button>
                     
-                    <button onClick={() => setScenarioMode('image')} className="p-8 border-2 border-gray-100 rounded-[32px] text-left hover:border-emerald-500 hover:bg-emerald-50 transition-all group">
-                      <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-gray-50 group-hover:scale-110 transition-transform"><ImageIcon size={24} className="text-emerald-600" /></div>
-                      <h4 className="font-bold text-lg mb-1">From Image</h4>
-                      <p className="text-gray-400 text-sm">Upload a photo to extract context instantly.</p>
+                    <button onClick={() => setScenarioMode('image')} className="p-4 rounded-2xl text-left hover:bg-emerald-50 transition-all group shadow-[0_2px_12px_rgb(0,0,0,0.03)] ring-1 ring-black/[0.03]">
+                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><ImageIcon size={20} className="text-emerald-600" /></div>
+                      <h4 className="font-bold text-sm mb-0.5">From Image</h4>
+                      <p className="text-gray-400 text-[11px]">Upload a photo to extract context instantly.</p>
                     </button>
                   </div>
                 </div>
@@ -1291,26 +1796,26 @@ export default function App() {
         {inspectedWord && (
           <div 
             onClick={() => setInspectedWord(null)}
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-start justify-center p-6 overflow-y-auto pt-20"
+            className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[110] flex items-start justify-center p-6 overflow-y-auto pt-20"
           >
             <motion.div 
               onClick={(e) => e.stopPropagation()}
               initial={{ y: 20, opacity: 0 }} 
               animate={{ y: 0, opacity: 1 }} 
               exit={{ y: 20, opacity: 0 }} 
-              className="bg-white max-w-lg w-full rounded-[40px] p-10 shadow-2xl relative mb-12"
+              className="bg-white w-full rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.12)] relative mb-12"
             >
-              <button 
-                onClick={() => setInspectedWord(null)} 
-                className="absolute top-8 right-8 text-gray-300 hover:text-black transition-colors z-10"
+              <button
+                onClick={() => setInspectedWord(null)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors z-10"
               >
-                <X size={28} />
+                <X size={22} />
               </button>
               
               <div className="mb-8">
                 <div className="flex items-center gap-6 mb-2">
-                  <h2 className="text-4xl font-extrabold">{inspectedWord.text}</h2>
-                  <span className="text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded-lg text-sm">{inspectedWord.details.pos}</span>
+                  <h2 className="text-4xl font-bold">{inspectedWord.text}</h2>
+                  <span className="text-blue-600 font-semibold bg-blue-50 px-2.5 py-1 rounded-full text-sm">{inspectedWord.details.pos}</span>
                   <button onClick={() => speak(inspectedWord.text)} className="p-3 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-100 transition-colors shadow-sm">
                     <Volume2 size={24} />
                   </button>
@@ -1331,16 +1836,16 @@ export default function App() {
 
               <div className="space-y-8">
                 <section>
-                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Definition</h4>
-                  <p className="text-xl font-bold text-gray-800 leading-relaxed">{inspectedWord.details.definition}</p>
+                  <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Definition</h4>
+                  <p className="text-xl font-semibold text-slate-900 leading-relaxed">{inspectedWord.details.definition}</p>
                 </section>
 
                 {inspectedWord.details.collocations && inspectedWord.details.collocations.length > 0 && (
                   <section>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Collocations</h4>
+                    <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Collocations</h4>
                     <div className="flex flex-wrap gap-2">
                       {inspectedWord.details.collocations.map((c: any, i: number) => (
-                        <div key={i} className="bg-gray-50 px-3 py-2 rounded-xl border border-gray-100 flex items-center gap-3 group/coll">
+                        <div key={i} className="bg-slate-50 px-3 py-2.5 rounded-xl flex items-center gap-3 group/coll">
                           <div>
                             <span className="font-bold text-gray-700 text-xs block">{c.phrase}</span>
                             <span className="text-[10px] text-gray-400">{c.translation}</span>
@@ -1355,10 +1860,10 @@ export default function App() {
                 )}
 
                 <section>
-                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Contextual Examples</h4>
+                  <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Contextual Examples</h4>
                   <div className="space-y-4">
                     {inspectedWord.details.examples.map((ex: any, i: number) => (
-                      <div key={i} className="bg-gray-50 border border-gray-100 p-4 rounded-2xl flex justify-between items-start group/ex">
+                      <div key={i} className="bg-slate-50 p-4 rounded-2xl flex justify-between items-start group/ex">
                         <div className="flex-1">
                           <p className="font-bold text-gray-700 text-sm mb-1 italic">"{ex.sentence}"</p>
                           <p className="text-xs text-gray-400 font-medium">{ex.translation}</p>
@@ -1378,10 +1883,10 @@ export default function App() {
                   }}
                   disabled={words.some(w => w.text.toLowerCase() === inspectedWord.text.toLowerCase())}
                   className={cn(
-                    "w-full py-5 rounded-3xl font-bold transition-all flex items-center justify-center gap-3 shadow-xl",
+                    "w-full py-4 rounded-full font-semibold transition-all flex items-center justify-center gap-3",
                     words.some(w => w.text.toLowerCase() === inspectedWord.text.toLowerCase())
-                      ? "bg-emerald-50 text-emerald-600 cursor-default shadow-none border border-emerald-100"
-                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100"
+                      ? "bg-emerald-50 text-emerald-600 cursor-default"
+                      : "bg-blue-600 text-white hover:bg-blue-700"
                   )}
                 >
                   {words.some(w => w.text.toLowerCase() === inspectedWord.text.toLowerCase()) ? (
@@ -1398,13 +1903,14 @@ export default function App() {
 
       {/* Global Loading Spinner */}
       <AnimatePresence>
-        {isLoading && !isAddingWord && !inspectedWord && (
-          <div className="fixed bottom-10 right-10 z-[100] bg-white border border-gray-100 p-4 rounded-2xl shadow-2xl flex items-center gap-4 border-l-4 border-l-blue-600">
+        {isLoading && !isAddingWord && !inspectedWord && mode !== 'podcast' && (
+          <div className="fixed bottom-10 right-10 z-[100] bg-white p-4 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] flex items-center gap-4">
             <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Gemini is processing...</span>
+            <span className="text-sm font-semibold text-slate-500">Gemini is processing...</span>
           </div>
         )}
       </AnimatePresence>
+      </div>{/* end phone container */}
     </div>
   );
 }
@@ -1417,16 +1923,16 @@ function TrainingModule({ icon, title, description, color, onClick }: { icon: Re
   };
 
   return (
-    <div 
+    <div
       onClick={onClick}
-      className="bg-white border border-gray-100 rounded-[40px] p-10 shadow-2xl flex flex-col items-center text-center space-y-6 cursor-pointer hover:scale-[1.05] transition-all group shadow-gray-100/50"
+      className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-4 cursor-pointer active:scale-[0.97] transition-all group"
     >
-      <div className={cn("w-20 h-20 bg-gray-50 text-gray-400 rounded-3xl flex items-center justify-center transition-all shadow-inner", colorMap[color])}>
+      <div className={cn("w-14 h-14 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center transition-all shrink-0", colorMap[color])}>
         {icon}
       </div>
-      <div>
-        <h4 className="text-lg font-bold mb-2">{title}</h4>
-        <p className="text-gray-400 text-xs leading-relaxed font-medium">{description}</p>
+      <div className="min-w-0">
+        <h4 className="text-base font-semibold text-slate-900">{title}</h4>
+        <p className="text-slate-500 text-sm leading-relaxed mt-1">{description}</p>
       </div>
     </div>
   );
@@ -1434,9 +1940,9 @@ function TrainingModule({ icon, title, description, color, onClick }: { icon: Re
 
 function NavIcon({ icon, active, onClick, label }: { icon: React.ReactNode, active: boolean, onClick: () => void, label: string }) {
   return (
-    <button onClick={onClick} className={cn("group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all", active ? "bg-blue-600 text-white shadow-xl shadow-blue-200" : "text-gray-300 hover:text-gray-600")}>
+    <button onClick={onClick} className={cn("group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all", active ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-700")}>
       {icon}
-      {active && <motion.div layoutId="rail" className="absolute -left-4 w-1.5 h-6 bg-blue-600 rounded-r-full hidden lg:block" />}
+      {active && <span className="lg:hidden absolute -top-1 left-1/2 -translate-x-1/2 w-5 h-1 bg-blue-600 rounded-b-full" />}
       <span className="sr-only">{label}</span>
     </button>
   );
@@ -1449,7 +1955,7 @@ function StatCard({ icon, title, value, color }: { icon: React.ReactNode, title:
     amber: "bg-amber-50 border-amber-100"
   };
   return (
-    <div className={cn("p-8 rounded-[32px] border flex items-center gap-6 shadow-sm", colors[color])}>
+    <div className={cn("p-4 rounded-2xl border flex items-center gap-3 shadow-sm", colors[color])}>
       <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm">
         {icon}
       </div>
@@ -1462,75 +1968,106 @@ function StatCard({ icon, title, value, color }: { icon: React.ReactNode, title:
 }
 
 function ScenarioForm({ onSave, onBack }: { onSave: (s: Scenario) => void, onBack: () => void }) {
-  const [data, setData] = useState({ title: '', description: '', systemPrompt: '', initialMessage: '', category: 'Workplace' as Scenario['category'] });
-  
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [category, setCategory] = useState<Scenario['category']>('Workplace');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleCreate = async () => {
+    if (!systemPrompt.trim()) return;
+    setIsGenerating(true);
+    try {
+      const res = await getGeminiResponse(
+        `Based on this conversation scenario instruction, generate a short title (max 8 words) and a one-sentence description. Return JSON only: {"title": "...", "description": "..."}` ,
+        systemPrompt
+      );
+      let title = 'Custom Dialogue';
+      let description = systemPrompt.slice(0, 60) + '...';
+      if (res) {
+        try {
+          const parsed = JSON.parse(res);
+          if (parsed.title) title = parsed.title;
+          if (parsed.description) description = parsed.description;
+        } catch {}
+      }
+      onSave({
+        id: Date.now().toString(),
+        title,
+        description,
+        systemPrompt,
+        category,
+        initialMessage: `Let's start! I'm ready for this conversation about ${title.toLowerCase()}.`,
+      });
+    } catch {
+      onSave({
+        id: Date.now().toString(),
+        title: 'Custom Dialogue',
+        description: systemPrompt.slice(0, 60) + '...',
+        systemPrompt,
+        category,
+        initialMessage: "Let's start our conversation!",
+      });
+    }
+    setIsGenerating(false);
+  };
+
   return (
-    <div className="space-y-8 py-4">
-      <div className="flex items-center justify-between items-start">
+    <div className="space-y-6 py-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-2xl font-black">Manual Config</h3>
-          <p className="text-gray-400 text-sm">Define the boundaries of your simulation.</p>
+          <h3 className="text-xl font-semibold text-slate-900">手动创建对话</h3>
+          <p className="text-slate-500 text-sm">描述你想要的对话场景，AI 自动生成标题</p>
         </div>
-        <button onClick={onBack} className="text-gray-400 hover:text-black font-bold text-sm">CANCEL</button>
+        <button onClick={onBack} className="text-slate-500 hover:text-slate-900 font-semibold text-sm">取消</button>
       </div>
-      
-      <div className="space-y-6">
+
+      <div className="space-y-4">
         <div>
-          <label className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block mb-2">Scenario Title</label>
-          <input 
-            value={data.title} onChange={e => setData({...data, title: e.target.value})}
-            className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 font-bold focus:ring-4 focus:ring-blue-100 outline-none transition-all"
-            placeholder="e.g. Asking for a Salary Raise"
+          <label className="text-xs font-semibold uppercase tracking-widest text-slate-400 block mb-2">对话场景</label>
+          <textarea
+            autoFocus
+            value={systemPrompt}
+            onChange={e => setSystemPrompt(e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-4 font-medium outline-none min-h-[140px] focus:ring-4 focus:ring-blue-100 transition-all"
+            placeholder="描述对话场景，例如：你是一个严格的面试官，我是一名应聘者，正在进行产品经理岗位的终面..."
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
-           <div>
-            <label className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block mb-2">Category</label>
-            <select 
-              value={data.category} onChange={e => setData({...data, category: e.target.value as any})}
-              className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 font-bold outline-none cursor-pointer"
-            >
-              <option value="Workplace">Workplace</option>
-              <option value="Daily">Daily</option>
-              <option value="Travel">Travel</option>
-              <option value="Other">Other</option>
-            </select>
+        <div>
+          <label className="text-xs font-semibold uppercase tracking-widest text-slate-400 block mb-2">分类</label>
+          <div className="flex gap-2">
+            {(['Workplace', 'Daily', 'Travel', 'Shopping', 'Other'] as const).map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategory(cat)}
+                className={cn(
+                  "px-3 py-2 rounded-full text-sm font-semibold transition-all",
+                  category === cat
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-slate-400 hover:bg-slate-50"
+                )}
+              >
+                {cat}
+              </button>
+            ))}
           </div>
-          <div>
-            <label className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block mb-2">Initial Message</label>
-            <input 
-              value={data.initialMessage} onChange={e => setData({...data, initialMessage: e.target.value})}
-              className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 font-bold outline-none"
-              placeholder="How AI starts..."
-            />
-          </div>
-        </div>
-        <div>
-          <label className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block mb-2">Description</label>
-          <textarea 
-            value={data.description} onChange={e => setData({...data, description: e.target.value})}
-            className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 font-medium outline-none min-h-[80px]"
-            placeholder="Short context for your library..."
-          />
-        </div>
-        <div>
-          <label className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block mb-2">AI Master Plan (System Prompt)</label>
-          <textarea 
-            value={data.systemPrompt} onChange={e => setData({...data, systemPrompt: e.target.value})}
-            className="w-full bg-gray-50 border border-gray-100 rounded-2xl p-4 font-medium outline-none min-h-[120px]"
-            placeholder="Instruct the AI: 'You are a difficult boss who...'"
-          />
         </div>
       </div>
-      
-      <button 
-        onClick={() => {
-          if (!data.title || !data.systemPrompt) return;
-          onSave({ ...data, id: Date.now().toString() });
-        }}
-        className="w-full bg-blue-600 text-white py-5 rounded-[24px] font-bold text-lg shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95"
+
+      <button
+        onClick={handleCreate}
+        disabled={!systemPrompt.trim() || isGenerating}
+        className={cn(
+          "w-full py-4 rounded-full font-semibold text-sm transition-all",
+          (!systemPrompt.trim() || isGenerating)
+            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+            : "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.97]"
+        )}
       >
-        CONFIRM & SAVE
+        {isGenerating ? (
+          <span className="flex items-center justify-center gap-2">
+            <div className="w-4 h-4 border-2 border-t-white rounded-full animate-spin" />
+            AI 生成中...
+          </span>
+        ) : "创建对话"}
       </button>
     </div>
   );
@@ -1538,166 +2075,267 @@ function ScenarioForm({ onSave, onBack }: { onSave: (s: Scenario) => void, onBac
 
 function ImageScenarioExtractor({ onExtracted, onBack, onLoading }: { onExtracted: (s: Scenario) => void, onBack: () => void, onLoading: (l: boolean) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+  };
+
+  const handleGenerate = async () => {
+    if (!extractedText.trim()) return;
+    setIsGenerating(true);
     onLoading(true);
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1];
-      const result = await parseScenarioFromImage(base64, file.type);
+    try {
+      const result = await parseScenarioFromImage(extractedText);
       if (result) {
-        onExtracted({ ...result, id: Date.now().toString() });
+        onExtracted({ ...result, id: Date.now().toString(), extractedText: extractedText.trim() });
       }
+    } finally {
+      setIsGenerating(false);
       onLoading(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   return (
-    <div className="space-y-10 py-10 text-center">
-      <div>
-        <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-sm">
-          <ImageIcon size={32} />
+    <div className="space-y-5 py-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-semibold text-slate-900 mb-1">从图片创建对话</h3>
+          <p className="text-slate-500 text-sm">上传图片，输入其中的文本内容，AI 自动生成对话</p>
         </div>
-        <h3 className="text-3xl font-black mb-2">Instant Scenario Extraction</h3>
-        <p className="text-gray-400 max-w-sm mx-auto">Upload a screenshot from a movie, a page from a book, or a workplace screenshot. AI will generate a training session for you.</p>
+        <button onClick={onBack} className="text-slate-500 hover:text-slate-900 font-semibold text-sm">取消</button>
       </div>
-      
-      <div className="border-4 border-dashed border-gray-100 rounded-[40px] p-20 hover:border-emerald-200 hover:bg-emerald-50/20 transition-all group flex flex-col items-center justify-center cursor-pointer" onClick={() => fileRef.current?.click()}>
-        <input type="file" ref={fileRef} hidden accept="image/*" onChange={handleFile} />
-        <Upload size={48} className="text-gray-200 group-hover:text-emerald-500 transition-colors mb-4" />
-        <p className="text-gray-400 font-bold group-hover:text-emerald-600">Select an image to analyze</p>
-      </div>
-      
-      <button onClick={onBack} className="text-gray-400 font-bold hover:text-black">GO BACK</button>
+
+      {/* Image upload area */}
+      {!previewUrl ? (
+        <div className="border-2 border-dashed border-slate-300 rounded-2xl p-10 hover:border-blue-300 hover:bg-blue-50/20 transition-all group flex flex-col items-center justify-center cursor-pointer" onClick={() => fileRef.current?.click()}>
+          <input type="file" ref={fileRef} hidden accept="image/*" onChange={handleFile} />
+          <Upload size={32} className="text-slate-300 group-hover:text-blue-500 transition-colors mb-2" />
+          <p className="text-slate-400 text-sm font-semibold group-hover:text-blue-600">点击上传图片</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="relative rounded-2xl overflow-hidden bg-slate-100">
+            <img src={previewUrl} alt="预览" className="w-full max-h-48 object-contain" />
+            <button
+              onClick={() => { setPreviewUrl(null); setExtractedText(''); }}
+              className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-widest text-slate-400 block mb-2">图片中的文本内容</label>
+            <textarea
+              autoFocus
+              value={extractedText}
+              onChange={e => setExtractedText(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200/60 rounded-2xl p-4 font-medium outline-none min-h-[120px] focus:ring-4 focus:ring-blue-100 transition-all"
+              placeholder="输入图片中的英文文本内容..."
+            />
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            disabled={!extractedText.trim() || isGenerating}
+            className={cn(
+              "w-full py-4 rounded-full font-semibold text-sm transition-all",
+              (!extractedText.trim() || isGenerating)
+                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                : "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.97]"
+            )}
+          >
+            {isGenerating ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-t-white rounded-full animate-spin" />
+                AI 生成中...
+              </span>
+            ) : "生成对话场景"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-const WordRow: React.FC<{ 
-  word: Word, 
-  onPlay: () => void, 
-  selected: boolean, 
-  onSelect: () => void, 
-  onDelete: () => void, 
+const WordRow: React.FC<{
+  word: Word,
+  onPlay: () => void,
+  selected: boolean,
+  onSelect: () => void,
+  onDelete: () => void,
   speak: (t: string) => void,
   onRefresh?: () => void,
   isSelectionMode?: boolean
 }> = ({ word, onPlay, selected, onSelect, onDelete, speak, onRefresh, isSelectionMode }) => {
   const [expanded, setExpanded] = useState(false);
-  
+  const [swipeX, setSwipeX] = useState(0);
+  const touchStartX = useRef<number>(0);
+  const touchStartY = useRef<number>(0);
+  const touchCurrentX = useRef<number>(0);
+  const isSwiping = useRef(false);
+
   const hasMissingData = !word.ukPhonetic || !word.collocations || word.collocations.length === 0;
+  const DELETE_THRESHOLD = 80;
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    touchCurrentX.current = e.touches[0].clientX;
+    isSwiping.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const dx = touchStartX.current - e.touches[0].clientX;
+    const dy = touchStartY.current - e.touches[0].clientY;
+    if (!isSwiping.current && Math.abs(dy) > Math.abs(dx)) return;
+    if (Math.abs(dx) > 10) isSwiping.current = true;
+    touchCurrentX.current = e.touches[0].clientX;
+    if (dx > 0) {
+      setSwipeX(Math.min(dx, 160));
+    } else {
+      setSwipeX(0);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (isSwiping.current) {
+      const diff = touchStartX.current - touchCurrentX.current;
+      if (diff > DELETE_THRESHOLD) {
+        onDelete();
+      }
+    }
+    setSwipeX(0);
+    isSwiping.current = false;
+  };
 
   return (
-    <div className={cn("p-4 transition-all rounded-2xl group", expanded ? "bg-gray-50 my-4 shadow-sm ring-1 ring-gray-200/50" : "hover:bg-gray-50")}>
-      <div className="flex items-center gap-4">
-        {isSelectionMode && (
-          <button onClick={onSelect} className={cn("transition-all h-8 w-8 rounded-xl flex items-center justify-center", selected ? "bg-blue-600 text-white shadow-lg shadow-blue-100" : "bg-gray-100 text-gray-300 hover:text-gray-400")}>
-            {selected ? <Check size={18} /> : <Square size={18} />}
-          </button>
-        )}
-        <div className="flex-1 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          <div className="flex items-center gap-4 flex-wrap">
-            <h4 className="font-extrabold text-xl">{word.text}</h4>
-            {word.pos && <span className="text-blue-600 font-bold text-[10px] bg-blue-50 px-2 py-0.5 rounded-full ring-1 ring-blue-100">{word.pos}</span>}
-            
-            <div className="flex gap-4 text-gray-400 font-mono text-[11px] items-center">
-              <button 
-                onClick={(e) => { e.stopPropagation(); speak(word.text, { accent: 'UK' }); }}
-                className={cn("flex items-center gap-1.5 transition-colors", word.ukPhonetic ? "hover:text-blue-600" : "opacity-30")}
-              >
-                <span className="font-bold bg-gray-100 px-1.5 rounded text-[9px] text-gray-500 uppercase">UK</span> 
-                {word.ukPhonetic || "---"}
-                <Volume2 size={12} />
-              </button>
-              <button 
-                onClick={(e) => { e.stopPropagation(); speak(word.text, { accent: 'US' }); }}
-                className={cn("flex items-center gap-1.5 transition-colors", word.usPhonetic ? "hover:text-blue-600" : "opacity-30")}
-              >
-                <span className="font-bold bg-gray-100 px-1.5 rounded text-[9px] text-gray-500 uppercase">US</span> 
-                {word.usPhonetic || "---"}
-                <Volume2 size={12} />
-              </button>
-            </div>
-
-            {hasMissingData && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); onRefresh?.(); }}
-                className="text-[9px] font-black uppercase text-amber-500 bg-amber-50 px-2 py-1 rounded-lg border border-amber-100 flex items-center gap-1 hover:bg-amber-100 transition-all ml-auto md:ml-0"
-              >
-                <RotateCcw size={10} /> Data Incomplete - Sync?
-              </button>
-            )}
-          </div>
-          {!expanded && <p className="text-gray-500 text-sm mt-1 font-medium">{word.definition}</p>}
-        </div>
-        <div className="flex items-center gap-1.5 md:gap-2">
-          <button onClick={onDelete} className="p-2.5 md:p-3 bg-white border border-gray-100 rounded-2xl text-gray-300 hover:text-red-500 hover:border-red-100 transition-all shadow-sm opacity-0 group-hover:opacity-100 focus:opacity-100">
-            <Trash2 size={18} />
-          </button>
-          <button onClick={onPlay} className="p-2.5 md:p-3 bg-white border border-gray-100 rounded-2xl text-gray-300 hover:text-blue-600 transition-all shadow-sm">
-            <Volume2 size={18} />
-          </button>
-        </div>
+    <div className="relative overflow-hidden rounded-2xl">
+      {/* Delete button behind the row */}
+      <div className="absolute inset-y-0 right-0 w-20 flex items-center justify-center bg-red-50">
+        <Trash2 size={20} className="text-red-400" />
       </div>
-      
-      <AnimatePresence>
-        {expanded && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="mt-8 pt-8 border-t border-gray-200/50 space-y-8">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h5 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Definition</h5>
-                <button onClick={() => speak(word.definition)} className="text-gray-300 hover:text-blue-600 transition-colors"><Volume2 size={14} /></button>
+
+      {/* Main content — slides left on swipe */}
+      <div
+        style={{ transform: `translateX(${-swipeX}px)`, transition: swipeX === 0 ? 'transform 0.2s ease' : 'none' }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className={cn("relative p-4 transition-colors group bg-white", expanded ? "bg-slate-50 my-2 shadow-[0_2px_12px_rgb(0,0,0,0.03)] ring-1 ring-black/[0.03]" : "hover:bg-slate-50")}
+      >
+        <div className="flex items-center gap-4">
+          {isSelectionMode && (
+            <button onClick={onSelect} className={cn("transition-all h-8 w-8 rounded-xl flex items-center justify-center", selected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-300 hover:text-slate-400")}>
+              {selected ? <Check size={18} /> : <Square size={18} />}
+            </button>
+          )}
+          <div className="flex-1 cursor-pointer" onClick={isSelectionMode ? onSelect : () => setExpanded(!expanded)}>
+            <div className="flex items-center gap-4 flex-wrap">
+              <h4 className="font-bold text-xl text-slate-900">{word.text}</h4>
+              {word.pos && <span className="text-blue-600 font-semibold text-xs bg-blue-50 px-2 py-0.5 rounded-full">{word.pos}</span>}
+
+              <div className="flex gap-4 text-slate-400 font-mono text-xs items-center">
+                <button
+                  onClick={(e) => { e.stopPropagation(); speak(word.text, { accent: 'UK' }); }}
+                  className={cn("flex items-center gap-1.5 transition-colors", word.ukPhonetic ? "hover:text-blue-600" : "opacity-30")}
+                >
+                  <span className="font-semibold bg-slate-100 px-1.5 rounded text-[10px] text-slate-500 uppercase">UK</span>
+                  {word.ukPhonetic || "---"}
+                  <Volume2 size={12} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); speak(word.text, { accent: 'US' }); }}
+                  className={cn("flex items-center gap-1.5 transition-colors", word.usPhonetic ? "hover:text-blue-600" : "opacity-30")}
+                >
+                  <span className="font-semibold bg-slate-100 px-1.5 rounded text-[10px] text-slate-500 uppercase">US</span>
+                  {word.usPhonetic || "---"}
+                  <Volume2 size={12} />
+                </button>
               </div>
-              <p className="text-gray-900 font-bold text-2xl leading-tight">{word.definition}</p>
+
+              {hasMissingData && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRefresh?.(); }}
+                  className="text-[10px] font-semibold text-amber-500 bg-amber-50 px-2 py-1 rounded-lg flex items-center gap-1 hover:bg-amber-100 transition-all ml-auto md:ml-0"
+                >
+                  <RotateCcw size={10} /> Data Incomplete - Sync?
+                </button>
+              )}
             </div>
-            
-            <div className="space-y-4">
-              <h5 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Common Collocations</h5>
-              {word.collocations && word.collocations.length > 0 ? (
-                <div className="flex flex-wrap gap-3">
-                  {word.collocations.map((c, i) => (
-                    <div key={i} className="bg-white px-4 py-3 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4 hover:border-blue-200 hover:bg-blue-50/10 transition-all group/coll">
-                      <div>
-                        <span className="font-bold text-gray-800 text-sm block">{c.phrase}</span>
-                        <span className="text-xs text-gray-400">{c.translation}</span>
+            {!expanded && <p className="text-slate-500 text-sm mt-1">{word.definition}</p>}
+          </div>
+          <div className="flex items-center gap-1.5 md:gap-2">
+            <button onClick={onDelete} className="p-2.5 rounded-xl text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 focus:opacity-100">
+              <Trash2 size={18} />
+            </button>
+            <button onClick={onPlay} className="p-2.5 rounded-xl text-slate-300 hover:text-blue-600 transition-all">
+              <Volume2 size={18} />
+            </button>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {expanded && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} className="mt-6 pt-6 border-t border-black/[0.04] space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h5 className="text-xs font-semibold uppercase tracking-widest text-slate-400">Definition</h5>
+                  <button onClick={() => speak(word.definition)} className="text-gray-300 hover:text-blue-600 transition-colors"><Volume2 size={14} /></button>
+                </div>
+                <p className="text-slate-900 font-bold text-2xl leading-tight">{word.definition}</p>
+              </div>
+
+              <div className="space-y-4">
+                <h5 className="text-xs font-semibold uppercase tracking-widest text-slate-400">Common Collocations</h5>
+                {word.collocations && word.collocations.length > 0 ? (
+                  <div className="flex flex-wrap gap-3">
+                    {word.collocations.map((c, i) => (
+                      <div key={i} className="bg-white px-4 py-3 rounded-xl flex items-center gap-4 hover:bg-blue-50/50 transition-all group/coll shadow-[0_2px_8px_rgb(0,0,0,0.02)]">
+                        <div>
+                          <span className="font-semibold text-slate-800 text-sm block">{c.phrase}</span>
+                          <span className="text-xs text-slate-400">{c.translation}</span>
+                        </div>
+                        <button onClick={() => speak(c.phrase)} className="text-slate-300 group-hover/coll:text-blue-500 transition-colors">
+                          <Volume2 size={14} />
+                        </button>
                       </div>
-                      <button onClick={() => speak(c.phrase)} className="text-gray-300 group-hover/coll:text-blue-500 transition-colors">
-                        <Volume2 size={14} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-6 rounded-2xl text-center bg-slate-50">
+                    <p className="text-slate-400 text-sm">No collocation data found for this entry.</p>
+                    <button onClick={onRefresh} className="mt-2 text-sm font-semibold text-blue-600 hover:underline">Re-run AI Analysis</button>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <h5 className="text-xs font-semibold uppercase tracking-widest text-slate-400">Contextual Examples</h5>
+                <div className="space-y-4">
+                  {word.examples.map((ex, i) => (
+                    <div key={i} className="bg-slate-50 p-4 rounded-xl flex justify-between items-start hover:bg-blue-50/50 transition-all group/ex">
+                      <div className="flex-1">
+                        <p className="font-semibold text-slate-800 text-base mb-2 italic leading-relaxed">"{ex.sentence}"</p>
+                        <p className="text-sm text-slate-400">{ex.translation}</p>
+                      </div>
+                      <button onClick={() => speak(ex.sentence)} className="p-3 text-slate-300 group-hover/ex:text-blue-500 transition-colors">
+                        <Volume2 size={18} />
                       </button>
                     </div>
                   ))}
                 </div>
-              ) : (
-                <div className="p-6 border-2 border-dashed border-gray-100 rounded-3xl text-center">
-                  <p className="text-gray-300 text-sm italic">No collocation data found for this entry.</p>
-                  <button onClick={onRefresh} className="mt-2 text-xs font-bold text-blue-500 hover:underline">Re-run AI Analysis</button>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <h5 className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">Contextual Examples</h5>
-              <div className="space-y-4">
-                {word.examples.map((ex, i) => (
-                  <div key={i} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm flex justify-between items-start hover:shadow-lg hover:border-emerald-100 transition-all group/ex">
-                    <div className="flex-1">
-                      <p className="font-bold text-gray-800 text-base mb-2 italic leading-relaxed">"{ex.sentence}"</p>
-                      <p className="text-sm text-gray-400 font-medium">{ex.translation}</p>
-                    </div>
-                    <button onClick={() => speak(ex.sentence)} className="p-3 text-gray-200 group-hover/ex:text-emerald-500 transition-colors">
-                      <Volume2 size={18} />
-                    </button>
-                  </div>
-                ))}
               </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 };
@@ -1708,45 +2346,89 @@ const ScenarioCard: React.FC<{ scenario: Scenario, onClick: () => void }> = ({ s
   const colorClass = scenario.category === 'Workplace' ? 'text-blue-600 bg-blue-50' : scenario.category === 'Shopping' ? 'text-emerald-600 bg-emerald-50' : scenario.category === 'Travel' ? 'text-amber-600 bg-amber-50' : 'text-gray-600 bg-gray-50';
 
   return (
-    <button onClick={onClick} className="bg-white border border-gray-100 p-6 md:p-8 rounded-[32px] md:rounded-[40px] text-left hover:border-blue-400 hover:shadow-2xl transition-all group overflow-hidden flex flex-col h-full shadow-sm shadow-gray-100/20 relative">
+    <button onClick={onClick} className="bg-white p-3.5 rounded-2xl text-left hover:shadow-[0_4px_20px_rgb(0,0,0,0.06)] transition-all group overflow-hidden flex flex-col h-full shadow-[0_2px_12px_rgb(0,0,0,0.03)] relative">
       {isCustom && (
-        <div className="absolute top-4 right-4 md:top-6 md:right-6 px-3 py-1 bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-widest rounded-full ring-1 ring-amber-200">
+        <div className="absolute top-2 right-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-semibold rounded-full">
           Manual
         </div>
       )}
-      <div className={cn("w-12 h-12 md:w-14 md:h-14 rounded-2xl md:rounded-3xl flex items-center justify-center mb-6 transition-all transform group-hover:scale-110", colorClass)}>
-        <Icon size={24} className="md:w-7 md:h-7" />
+      <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center mb-2 transition-all group-hover:scale-110", colorClass)}>
+        <Icon size={16} />
       </div>
-      <div className="flex-1">
-        <h3 className="text-lg md:text-xl font-bold mb-2 group-hover:text-blue-600 transition-colors uppercase tracking-tight line-clamp-1">{scenario.title}</h3>
-        <p className="text-gray-400 text-[11px] md:text-xs font-medium leading-relaxed mb-6 line-clamp-3 italic">{scenario.description}</p>
-      </div>
-      <div className="flex items-center justify-between w-full mt-auto pt-4 border-t border-gray-50">
-        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-300">{scenario.category}</span>
-        <div className="flex items-center gap-1 text-blue-600 font-bold text-[10px] uppercase tracking-widest bg-blue-50 px-3 py-1.5 rounded-full ring-1 ring-blue-100 group-hover:bg-blue-600 group-hover:text-white transition-all">
-          ENTER <ChevronRight size={14} />
-        </div>
-      </div>
+      <h3 className="text-sm font-semibold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">{scenario.title}</h3>
+      <p className="text-slate-500 text-xs leading-relaxed line-clamp-2 mt-1">{scenario.description}</p>
     </button>
   );
 };
 
-function ChatInterface({ scenario, onBack, onAddWord }: { scenario: Scenario, onBack: () => void, onAddWord: (t: string) => void }) {
+const HistoryCard: React.FC<{
+  type: 'session' | 'scenario';
+  data: ChatSession | Scenario;
+  onResume: (s: ChatSession) => void;
+  onSelect: (s: Scenario) => void;
+  onDeleteSession: (id: string) => void;
+  onDeleteScenario: (id: string) => void;
+}> = ({ type, data, onResume, onSelect, onDeleteSession, onDeleteScenario }) => {
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
+
+  return (
+    <div
+      onClick={() => {
+        if (longPressTriggered.current) { longPressTriggered.current = false; return; }
+        type === 'session' ? onResume(data as ChatSession) : onSelect(data as Scenario);
+      }}
+      onTouchStart={() => {
+        longPressTriggered.current = false;
+        longPressTimer.current = setTimeout(() => {
+          longPressTriggered.current = true;
+          if (confirm('确定删除这条对话记录吗？')) {
+            type === 'session' ? onDeleteSession(data.id) : onDeleteScenario(data.id);
+          }
+        }, 600);
+      }}
+      onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+      onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+      className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgb(0,0,0,0.03)] cursor-pointer hover:shadow-[0_4px_20px_rgb(0,0,0,0.06)] transition-all active:bg-slate-50 select-none"
+    >
+      <h4 className="font-semibold text-base text-slate-900">{data.title}</h4>
+      {type === 'session' ? (
+        <>
+          <p className="text-gray-400 text-[10px] mt-1">
+            {(data as ChatSession).messages.length} 条消息 · {new Date((data as ChatSession).updatedAt).toLocaleDateString('zh-CN')}
+          </p>
+          {(data as ChatSession).targetWords && (data as ChatSession).targetWords!.length > 0 && (
+            <div className="flex gap-1 mt-2 flex-wrap">
+              {(data as ChatSession).targetWords!.map(w => (
+                <span key={w} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[10px] font-semibold rounded-full">{w}</span>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-slate-500 text-sm mt-1">{(data as Scenario).description}</p>
+      )}
+    </div>
+  );
+};
+
+function ChatInterface({ scenario, onBack, onAddWord, targetWords, initialMessages }: { scenario: Scenario, onBack: (messages: ChatMessage[]) => void, onAddWord: (t: string) => void, targetWords?: string[], initialMessages?: ChatMessage[] }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [suggestion, setSuggestion] = useState<string | null>(null);
-  const { listen, isListening, speak } = useSpeech();
+  const { listen, isListening, speak, cancel } = useSpeech();
 
-  useEffect(() => { 
-    // Initial message
-    setMessages([{ role: 'model', text: scenario.initialMessage }]); 
-    // Small delay to let UI settle then speak and listen
-    const timer = setTimeout(() => {
-      speak(scenario.initialMessage);
-      // Automatically start listening after the first message
-      listen(setInputText);
-    }, 500);
-    return () => clearTimeout(timer);
+  useEffect(() => {
+    if (initialMessages && initialMessages.length > 0) {
+      setMessages(initialMessages);
+    } else {
+      setMessages([{ role: 'model', text: scenario.initialMessage }]);
+      const timer = setTimeout(() => {
+        speak(scenario.initialMessage);
+        listen(setInputText);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
   }, [scenario]);
 
   const handleSend = async (t?: string) => {
@@ -1756,7 +2438,8 @@ function ChatInterface({ scenario, onBack, onAddWord }: { scenario: Scenario, on
     setInputText('');
     setSuggestion(null);
     
-    const prompt = `Current Context: ${scenario.title}\nUser just said: "${txt}"\nIf the user input is partially Chinese or unclear, first provide the correct/professional English version. Then continue the roleplay naturally.`;
+    const extractedContext = scenario.extractedText ? `\n\nReference text from image:\n"""\n${scenario.extractedText}\n"""\nPlease base the conversation on this text's topic and vocabulary.` : '';
+    const prompt = `Current Context: ${scenario.title}${extractedContext}\nUser just said: "${txt}"\nIf the user input is partially Chinese or unclear, first provide the correct/professional English version. Then continue the roleplay naturally.`;
     const res = await getGeminiResponse(prompt, scenario.systemPrompt + "\nIf the user is struggling, suggest 2-3 advanced words/phrases they could have used.");
     
     if (res && res.includes('"')) {
@@ -1784,25 +2467,41 @@ function ChatInterface({ scenario, onBack, onAddWord }: { scenario: Scenario, on
   };
 
   return (
-    <div className="h-[80vh] md:h-[70vh] flex flex-col bg-white border border-gray-100 rounded-[32px] overflow-hidden shadow-2xl relative">
-      <div className="p-4 md:p-6 border-b border-gray-50 flex items-center justify-between">
-        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-xl"><ChevronLeft size={24} /></button>
+    <div className="h-[80vh] lg:h-[500px] flex flex-col bg-white rounded-3xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative">
+      <div className="p-4 md:p-6 border-b border-black/[0.04] flex items-center justify-between">
+        <button onClick={() => { cancel(); onBack(messages); }} className="p-2 hover:bg-gray-100 rounded-xl"><ChevronLeft size={24} /></button>
         <div className="flex flex-col items-center">
-          <h3 className="font-bold text-sm md:text-base line-clamp-1">{scenario.title}</h3>
-          <span className="text-[9px] md:text-[10px] uppercase font-bold text-emerald-500 tracking-widest leading-none">Fluid Exchange</span>
+          <h3 className="font-semibold text-base md:text-lg line-clamp-1 text-slate-900">{scenario.title}</h3>
+          <span className="text-xs font-medium text-slate-500 tracking-wide leading-none">Fluid Exchange</span>
         </div>
         <div className="w-10" />
       </div>
 
+      {scenario.extractedText && (
+        <div className="px-4 py-3 bg-amber-50 border-b border-amber-100/50">
+          <p className="text-xs font-semibold text-amber-600 mb-1 flex items-center gap-1"><FileText size={12} /> 图片文本</p>
+          <p className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap break-words">{scenario.extractedText}</p>
+        </div>
+      )}
+
+      {targetWords && targetWords.length > 0 && (
+        <div className="px-4 py-2.5 bg-blue-50 border-b border-blue-100/50 flex items-center gap-2 overflow-x-auto scrollbar-none">
+          <Target size={12} className="text-blue-500 shrink-0" />
+          {targetWords.map(w => (
+            <span key={w} className="px-2.5 py-1 bg-white text-blue-700 text-xs font-semibold rounded-full whitespace-nowrap shadow-sm">{w}</span>
+          ))}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8">
         {messages.map((m, i) => (
           <div key={i} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
-            <div className={cn("max-w-[85%] md:max-w-[80%] p-4 rounded-[24px] md:rounded-3xl relative group text-sm md:text-base", m.role === 'user' ? "bg-gray-900 text-white rounded-tr-none" : "bg-gray-100 rounded-tl-none")}>
+            <div className={cn("max-w-[85%] p-3 rounded-xl relative group text-sm", m.role === 'user' ? "bg-gray-900 text-white rounded-tr-none" : "bg-gray-100 rounded-tl-none")}>
               <p className="leading-relaxed">{m.text}</p>
               {m.role === 'model' && (
                 <button 
                   onClick={() => speak(m.text)}
-                  className="absolute -right-10 top-0 p-2 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-blue-600 transition-all"
+                  className="absolute -right-10 top-0 p-2 text-slate-300 opacity-0 group-hover:opacity-100 hover:text-blue-600 transition-all"
                 >
                   <Volume2 size={16} />
                 </button>
@@ -1815,7 +2514,7 @@ function ChatInterface({ scenario, onBack, onAddWord }: { scenario: Scenario, on
       <AnimatePresence>
         {suggestion && (
           <motion.div initial={{ y: 20 }} animate={{ y: 0 }} className="px-8 pb-4">
-             <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl flex items-center justify-between">
+             <div className="bg-blue-50 p-3.5 rounded-xl flex items-center justify-between">
                <div className="flex items-center gap-2">
                  <Sparkles size={16} className="text-blue-600" />
                  <span className="text-sm font-bold text-blue-900">Recommended Phrase: <span className="italic">{suggestion}</span></span>
@@ -1828,7 +2527,7 @@ function ChatInterface({ scenario, onBack, onAddWord }: { scenario: Scenario, on
         )}
       </AnimatePresence>
 
-      <div className="p-4 md:p-8 border-t border-gray-50 bg-white">
+      <div className="p-4 md:p-6 border-t border-black/[0.04] bg-white">
         <div className="flex gap-2 md:gap-4">
           <div className="flex-1 relative">
             <input 
@@ -1857,7 +2556,7 @@ function ChatInterface({ scenario, onBack, onAddWord }: { scenario: Scenario, on
               </button>
             </div>
           </div>
-          <button onClick={() => handleSend()} className="bg-blue-600 text-white font-bold px-4 md:px-8 rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-50 flex items-center justify-center">
+          <button onClick={() => handleSend()} className="bg-blue-600 text-white font-semibold px-6 md:px-8 rounded-full hover:bg-blue-700 transition-all flex items-center justify-center">
             <span className="hidden md:inline">SEND</span>
             <ChevronRight size={20} className="md:hidden" />
           </button>
@@ -1885,10 +2584,10 @@ function FlashcardView({ words, onResult, onFinish, speak }: { words: Word[], on
   };
 
   return (
-    <div className="max-w-md mx-auto py-10 space-y-12">
-      <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-widest px-4">
+    <div className="max-w-md mx-auto py-10 space-y-8">
+      <div className="flex justify-between items-center text-sm font-semibold text-slate-400 px-4">
         <span>Token {index + 1} of {words.length}</span>
-        <button onClick={onFinish} className="hover:text-black">EXIT</button>
+        <button onClick={onFinish} className="hover:text-slate-900">EXIT</button>
       </div>
       
       <div className="relative h-96 perspective-1000 group cursor-pointer" onClick={() => { setFlipped(!flipped); if(!flipped) speak(current.text); }}>
@@ -1898,17 +2597,17 @@ function FlashcardView({ words, onResult, onFinish, speak }: { words: Word[], on
           className="w-full h-full relative preserve-3d"
         >
           {/* Front */}
-          <div className="absolute inset-0 backface-hidden bg-white border-2 border-gray-100 rounded-[40px] flex flex-col items-center justify-center p-10 shadow-2xl">
-            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-8">
-              <Volume2 size={32} />
+          <div className="absolute inset-0 backface-hidden bg-white rounded-3xl flex flex-col items-center justify-center p-6 shadow-[0_8px_30px_rgb(0,0,0,0.06)]">
+            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
+              <Volume2 size={24} />
             </div>
-            <h2 className="text-4xl font-extrabold mb-4">{current.text}</h2>
-            <p className="text-gray-400 font-mono italic">{current.ukPhonetic}</p>
-            <p className="mt-8 text-xs font-bold text-blue-400 animate-pulse">TAP TO FLIP</p>
+            <h2 className="text-2xl font-extrabold mb-2">{current.text}</h2>
+            <p className="text-gray-400 font-mono text-xs italic">{current.ukPhonetic}</p>
+            <p className="mt-4 text-[10px] font-bold text-blue-400 animate-pulse">TAP TO FLIP</p>
           </div>
           {/* Back */}
-          <div className="absolute inset-0 backface-hidden bg-gray-900 border-2 border-gray-900 rounded-[40px] flex flex-col items-center justify-center p-10 text-white transform rotateY-180">
-            <p className="text-2xl font-bold mb-6 text-center">{current.definition}</p>
+          <div className="absolute inset-0 backface-hidden bg-gray-900 border-2 border-gray-900 rounded-2xl flex flex-col items-center justify-center p-6 text-white transform rotateY-180">
+            <p className="text-lg font-bold mb-4 text-center">{current.definition}</p>
             <div className="space-y-4 w-full">
               {current.examples.slice(0, 1).map((ex, i) => (
                 <div key={i} className="text-center">
@@ -1920,13 +2619,13 @@ function FlashcardView({ words, onResult, onFinish, speak }: { words: Word[], on
             <div className="mt-10 grid grid-cols-2 gap-4 w-full">
               <button 
                 onClick={(e) => { e.stopPropagation(); handleAction(false); }}
-                className="py-4 bg-white/10 hover:bg-white/20 rounded-2xl font-bold text-sm transition-colors"
+                className="py-4 bg-white/10 hover:bg-white/20 rounded-full font-semibold text-sm transition-colors"
               >
                 FORGOT
               </button>
               <button 
                 onClick={(e) => { e.stopPropagation(); handleAction(true); }}
-                className="py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl font-bold text-sm transition-colors"
+                className="py-4 bg-blue-600 hover:bg-blue-700 rounded-full font-semibold text-sm transition-colors"
               >
                 MASTERED
               </button>
@@ -1989,23 +2688,23 @@ function PronunciationChallengeView({
   if (!current) return null;
 
   return (
-    <div className="max-w-xl mx-auto py-12">
-      <div className="bg-white border border-gray-100 rounded-[40px] p-12 shadow-2xl space-y-10 text-center relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gray-100">
-          <motion.div 
+    <div className="w-full mx-auto py-6">
+      <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 text-center relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100">
+          <motion.div
             className="h-full bg-emerald-500"
             initial={{ width: 0 }}
             animate={{ width: `${((index + 1) / words.length) * 100}%` }}
           />
         </div>
 
-        <div className="space-y-2">
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Pronunciation Challenge</span>
-          <h2 className="text-4xl font-black text-gray-800 leading-tight">请读出该单词的英文</h2>
+        <div className="space-y-1 pt-2">
+          <span className="text-sm font-medium text-slate-500">Pronunciation Challenge</span>
+          <h2 className="text-3xl font-bold text-slate-900 leading-tight">请读出该单词的英文</h2>
         </div>
 
-        <div className="py-8 px-6 bg-gray-50 rounded-3xl border border-gray-100">
-           <p className="text-3xl font-bold text-gray-900">{current.definition}</p>
+        <div className="py-8 px-6 bg-slate-50 rounded-2xl">
+           <p className="text-2xl font-bold text-slate-900">{current.definition}</p>
         </div>
 
         <div className="flex flex-col items-center gap-6">
@@ -2013,8 +2712,8 @@ function PronunciationChallengeView({
             disabled={isListening || status === 'correct'}
             onClick={handleListen}
             className={cn(
-              "w-24 h-24 rounded-full flex items-center justify-center transition-all shadow-xl active:scale-95 group relative",
-              isListening ? "bg-red-500 text-white shadow-red-200" : "bg-emerald-600 text-white shadow-emerald-200 hover:scale-110"
+              "w-24 h-24 rounded-full flex items-center justify-center transition-all active:scale-95 group relative",
+              isListening ? "bg-red-500 text-white" : "bg-blue-600 text-white hover:bg-blue-700"
             )}
           >
             {isListening && (
@@ -2027,7 +2726,7 @@ function PronunciationChallengeView({
             <Mic size={40} className="relative z-10" />
           </button>
           
-          <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">
+          <p className="text-sm font-medium text-slate-500">
             {isListening ? "正在开启麦克风..." : "点击开始录音"}
           </p>
         </div>
@@ -2043,14 +2742,14 @@ function PronunciationChallengeView({
               <div className="text-red-500 font-bold flex items-center justify-center gap-2">
                 <XCircle size={20} /> Try again
               </div>
-              <div className="p-4 bg-red-50 rounded-2xl border border-red-100 italic text-red-800 text-sm">
+              <div className="p-4 bg-red-50 rounded-2xl italic text-red-800 text-sm">
                 "{transcript}"
               </div>
               <div className="flex flex-col items-center gap-2">
-                 <p className="text-xs text-gray-400 uppercase font-black tracking-widest">Target Word</p>
+                 <p className="text-sm text-slate-500 font-semibold">Target Word</p>
                  <div className="flex items-center gap-3">
                     <span className="text-2xl font-black">{current.text}</span>
-                    <button onClick={() => speak(current.text)} className="p-2 bg-white border border-gray-100 rounded-xl shadow-sm text-gray-400 hover:text-blue-600 transition-all">
+                    <button onClick={() => speak(current.text)} className="p-2 bg-white rounded-xl text-slate-400 hover:text-blue-600 transition-all">
                        <Volume2 size={16} />
                     </button>
                  </div>
@@ -2059,9 +2758,9 @@ function PronunciationChallengeView({
           )}
         </AnimatePresence>
 
-        <div className="pt-8 border-t border-gray-50 flex items-center justify-between">
-           <span className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">Progress: {index + 1} / {words.length}</span>
-           <button onClick={onFinish} className="text-[10px] font-bold text-gray-400 hover:text-black uppercase tracking-widest">Exit</button>
+        <div className="pt-6 border-t border-black/[0.04] flex items-center justify-between">
+           <span className="text-sm font-medium text-slate-400">Progress: {index + 1} / {words.length}</span>
+           <button onClick={onFinish} className="text-sm font-medium text-slate-400 hover:text-slate-900">Exit</button>
         </div>
       </div>
     </div>
@@ -2103,10 +2802,10 @@ function SpellingBeeView({ words, onResult, onFinish, speak }: { words: Word[], 
   if (words.length === 0) return null;
 
   return (
-    <div className="max-w-xl mx-auto py-20">
-      <div className="bg-white border border-gray-100 rounded-[40px] p-12 shadow-2xl space-y-10 text-center relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gray-100">
-          <motion.div 
+    <div className="w-full mx-auto py-6">
+      <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 text-center relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100">
+          <motion.div
             className="h-full bg-emerald-500"
             initial={{ width: 0 }}
             animate={{ width: `${(index / words.length) * 100}%` }}
@@ -2116,15 +2815,15 @@ function SpellingBeeView({ words, onResult, onFinish, speak }: { words: Word[], 
         <div className="flex justify-center">
           <button 
             onClick={() => speak(current.text)}
-            className="w-24 h-24 bg-emerald-50 text-emerald-600 rounded-[32px] flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-xl shadow-emerald-50"
+            className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all"
           >
             <Volume2 size={40} />
           </button>
         </div>
 
         <div className="space-y-2">
-          <h2 className="text-sm font-bold text-gray-400 uppercase tracking-[0.3em]">Definition</h2>
-          <p className="text-2xl font-black text-gray-800">{current.definition}</p>
+          <h2 className="text-sm font-medium text-slate-500">Definition</h2>
+          <p className="text-2xl font-bold text-slate-900">{current.definition}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -2133,16 +2832,16 @@ function SpellingBeeView({ words, onResult, onFinish, speak }: { words: Word[], 
             value={input}
             onChange={e => setInput(e.target.value)}
             className={cn(
-              "w-full bg-gray-50 border-2 rounded-3xl p-6 text-center text-2xl font-black outline-none transition-all",
-              status === 'correct' ? "border-emerald-500 bg-emerald-50 text-emerald-600" : 
+              "w-full bg-slate-50 border-2 rounded-full p-6 text-center text-2xl font-bold outline-none transition-all",
+              status === 'correct' ? "border-blue-600 bg-blue-50 text-blue-600" : 
               status === 'wrong' ? "border-red-500 bg-red-50 text-red-600 animate-shake" : 
-              "border-gray-100 focus:border-emerald-400 focus:bg-white"
+              "border-gray-100 focus:border-blue-400 focus:bg-white"
             )}
             placeholder="Type what you hear..."
           />
-          <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest px-4">
+          <div className="flex items-center justify-between text-sm font-medium text-slate-400 px-4">
             <span>Progress: {index + 1} / {words.length}</span>
-            <button type="button" onClick={onFinish} className="hover:text-black">GIVE UP</button>
+            <button type="button" onClick={onFinish} className="hover:text-slate-900">GIVE UP</button>
           </div>
         </form>
 
@@ -2152,9 +2851,9 @@ function SpellingBeeView({ words, onResult, onFinish, speak }: { words: Word[], 
               initial={{ opacity: 0, y: 10 }} 
               animate={{ opacity: 1, y: 0 }} 
               exit={{ opacity: 0 }}
-              className="pt-4 border-t border-red-50"
+              className="pt-4 border-t border-black/[0.04]"
             >
-              <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-1">Correct Answer:</p>
+              <p className="text-red-500 text-sm font-semibold mb-1">Correct Answer:</p>
               <p className="text-2xl font-black text-red-600">{current.text}</p>
             </motion.div>
           )}
@@ -2164,199 +2863,3 @@ function SpellingBeeView({ words, onResult, onFinish, speak }: { words: Word[], 
   );
 }
 
-function PodcastView({ 
-  data,
-  loading, 
-  onSpeak, 
-  onStop,
-  highlightWords, 
-  onInspect,
-  onFinish
-}: { 
-  data: any,
-  loading: boolean, 
-  onSpeak: (t: string, opts?: { voiceType?: 'A' | 'B' }) => void,
-  onStop?: () => void,
-  highlightWords: string[],
-  onInspect: (word: string) => void,
-  onFinish: () => void,
-  key?: string | number
-}) {
-  const [showTranslation, setShowTranslation] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentLineIndex, setCurrentLineIndex] = useState<number | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  
-  const playDialogue = async () => {
-    if (isPlaying) {
-      setIsPlaying(false);
-      setCurrentLineIndex(null);
-      onStop?.();
-      abortControllerRef.current?.abort();
-      return;
-    }
-
-    if (!data?.lines) return;
-    setIsPlaying(true);
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    try {
-      for (let i = 0; i < data.lines.length; i++) {
-        if (controller.signal.aborted) break;
-        const line = data.lines[i];
-        setCurrentLineIndex(i);
-        onSpeak(line.text, { voiceType: line.speaker });
-        
-        // Approximate wait time based on word count
-        const wordsCount = line.text.split(' ').length;
-        const delay = wordsCount * 450 + 1000;
-        
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(resolve, delay);
-          controller.signal.addEventListener('abort', () => {
-            clearTimeout(timeout);
-            reject(new Error('aborted'));
-          });
-        });
-      }
-    } catch (e: any) {
-      if (e.message !== 'aborted') console.error(e);
-    } finally {
-      if (!controller.signal.aborted) {
-        setIsPlaying(false);
-        setCurrentLineIndex(null);
-      }
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      onStop?.();
-      abortControllerRef.current?.abort();
-    };
-  }, [onStop]);
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-10">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 md:px-10 md:py-6 bg-white border border-gray-100 rounded-[32px] shadow-2xl">
-        <div className="flex items-center gap-6">
-          <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-[24px] flex items-center justify-center shadow-inner shrink-0"><Ear size={32} /></div>
-          <div>
-            <h3 className="font-black text-xl leading-tight">全景认知职场对话</h3>
-            <p className="text-[10px] uppercase font-bold text-gray-400 tracking-[0.3em] mt-1">Multi-Role Immersive Training</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button 
-            onClick={() => setShowTranslation(!showTranslation)} 
-            className={cn(
-              "flex-1 md:flex-initial h-12 md:h-14 px-4 md:px-6 rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2 font-bold text-[10px] md:text-xs uppercase tracking-widest",
-              showTranslation ? "bg-amber-100 text-amber-700 shadow-amber-50" : "bg-gray-50 text-gray-400 hover:text-black"
-            )}
-          >
-            <Languages size={18} />
-            {showTranslation ? "HIDE" : "SHOW"} ZH
-          </button>
-          <button 
-            disabled={loading} 
-            onClick={playDialogue} 
-            className={cn(
-              "flex-[2] md:flex-initial h-12 md:h-14 px-6 md:px-10 rounded-2xl transition-all shadow-xl font-bold flex items-center justify-center gap-3 text-xs md:text-sm",
-              isPlaying ? "bg-red-500 text-white shadow-red-100" : "bg-emerald-600 text-white hover:scale-105 active:scale-95 shadow-emerald-100"
-            )}
-          >
-            {isPlaying ? <Square size={20} fill="currentColor" /> : <Volume2 size={20} />}
-            {isPlaying ? "STOP" : "PLAY"}
-          </button>
-        </div>
-      </div>
-      
-      <div className="space-y-6">
-        {loading ? (
-          <div className="p-20 bg-white border border-gray-100 rounded-[40px] text-center space-y-4 shadow-xl">
-             <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-             <p className="font-bold text-gray-400 animate-pulse">Gemini 正在为您构思地道的职场交流...</p>
-          </div>
-        ) : (
-          data?.lines.map((line: any, i: number) => (
-            <motion.div 
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.1 }}
-              key={i} 
-              className={cn(
-                "flex gap-6 items-start w-full transition-opacity",
-                isPlaying && currentLineIndex !== null && currentLineIndex !== i ? "opacity-40" : "opacity-100"
-              )}
-            >
-              <div className={cn(
-                "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-lg font-black text-xs uppercase",
-                line.speaker === 'A' ? "bg-blue-600 text-white" : "bg-gray-900 text-white"
-              )}>
-                {line.name?.[0] || line.speaker}
-              </div>
-              <div className={cn(
-                "flex-1 p-8 rounded-[32px] shadow-sm ring-1 ring-black/5 relative group bg-white",
-                currentLineIndex === i && "ring-2 ring-emerald-500 shadow-xl"
-              )}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={cn(
-                     "text-[10px] font-black uppercase tracking-widest",
-                     line.speaker === 'A' ? "text-blue-600" : "text-gray-900"
-                  )}>
-                    {line.name || (line.speaker === 'A' ? 'Person A' : 'Person B')}
-                  </span>
-                </div>
-                <div className="text-gray-800 leading-relaxed font-medium text-lg">
-                  {line.text.split(/(\s+|,|\.|\?|!|:|;|\n)/).map((token: string, ti: number) => {
-                    const cleanWord = token.replace(/[^\w-]/g, '').toLowerCase();
-                    const isHighlighted = highlightWords.some(hw => hw.toLowerCase() === cleanWord);
-                    if (token.length === 0) return null;
-                    if (cleanWord.length === 0) return <span key={ti}>{token}</span>;
-                    return (
-                      <span 
-                        key={ti} 
-                        onClick={() => onInspect(cleanWord)}
-                        className={cn(
-                          "cursor-pointer px-1 rounded transition-all duration-200 inline-block",
-                          isHighlighted 
-                            ? "bg-amber-200 text-amber-900 font-bold decoration-amber-400 decoration-2 underline-offset-4 underline" 
-                            : "hover:bg-blue-100 hover:text-blue-700 text-gray-800"
-                        )}
-                      >
-                        {token}
-                      </span>
-                    );
-                  })}
-                </div>
-                {showTranslation && (
-                  <div className="mt-4 pt-4 border-t border-gray-100 text-gray-400 text-sm font-medium italic">
-                    {line.translation}
-                  </div>
-                )}
-                <button 
-                  onClick={() => onSpeak(line.text, { voiceType: line.speaker })}
-                  className="absolute top-6 right-6 p-2 text-gray-200 opacity-0 group-hover:opacity-100 hover:text-blue-600 transition-all"
-                >
-                  <Volume2 size={16} />
-                </button>
-              </div>
-            </motion.div>
-          ))
-        )}
-      </div>
-      
-      {!loading && (
-        <div className="flex justify-center pt-10">
-          <button 
-            onClick={onFinish}
-            className="px-12 py-5 bg-gray-900 text-white rounded-[24px] font-bold text-lg shadow-2xl hover:scale-105 active:scale-95 transition-all"
-          >
-            完成学习，继续探索
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}

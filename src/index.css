@@ -1,1 +1,24 @@
 @import "tailwindcss";
+
+/* ── iOS / App Store Global Design Tokens ── */
+
+:root {
+  --ios-bg: #F2F2F7;
+  --ios-card: #FFFFFF;
+  --ios-blue: #007AFF;
+  --ios-separator: rgba(60, 60, 67, 0.08);
+  --ios-shadow-card: 0 2px 12px rgba(0, 0, 0, 0.04);
+  --ios-radius-card: 16px;
+}
+
+body {
+  background-color: var(--ios-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (min-width: 1024px) {
+  body {
+    background-color: #e2e8f0;
+  }
+}

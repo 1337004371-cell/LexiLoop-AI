@@ -1,3 +1,5 @@
+import { STORY_SYSTEM_PROMPT, buildStoryUserPrompt } from '../prompts/story-generator';
+
 const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
 export const getGeminiResponse = async (
   prompt: string,
@@ -58,7 +60,21 @@ export const generateWordDetails = async (word: string) => {
   }
 
   // 2. 如果云端没有，则调用 DeepSeek API
-  const prompt = `Analyze the English word/phrase "${word}". Provide the following information in strict JSON format:
+  const wordCount = word.trim().split(/\s+/).length;
+  const isSentence = wordCount > 3 || /[.!?]$/.test(word.trim());
+
+  const prompt = isSentence
+    ? `The user saved an English sentence/phrase: "${word}". Provide the following in strict JSON format:
+  {
+    "pos": "sentence/phrase",
+    "ukPhonetic": "",
+    "usPhonetic": "",
+    "definition": "完整中文翻译",
+    "collocations": [{ "phrase": "key phrase from the sentence", "translation": "该短语的中文翻译" }],
+    "examples": [{ "sentence": "a similar sentence using the same structure", "translation": "该句的中文翻译" }]
+  }
+  Important: "definition" must be the COMPLETE Chinese translation of the entire sentence. Extract 2-3 key phrases into collocations. Return ONLY the JSON object, no other text.`
+    : `Analyze the English word/phrase "${word}". Provide the following information in strict JSON format:
   {
     "pos": "part of speech",
     "ukPhonetic": "UK phonetic",
@@ -109,24 +125,8 @@ export const generateWordDetails = async (word: string) => {
 export const generatePodcastDialogue = async (words: string[]) => {
   const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
 
-  const prompt = `Create a realistic workplace or daily life conversation script between two people (Person A and Person B) that naturally incorporates these English words: ${words.join(', ')}.
-  
-  Requirements:
-  1. Setting: A specific professional or daily scenario.
-  2. Tone: Very natural and conversational.
-  3. Format: Line by line dialogue.
-
-  Return the dialogue in strict JSON format:
-  {
-    "characters": { "A": "Name", "B": "Name" },
-    "lines": [
-      { "speaker": "A", "name": "Name", "text": "English text", "translation": "Chinese translation" },
-      { "speaker": "B", "name": "Name", "text": "English text", "translation": "Chinese translation" }
-    ]
-  }`;
-
   try {
-    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+    const response = await fetch(DEEPSEEK_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -135,7 +135,72 @@ export const generatePodcastDialogue = async (words: string[]) => {
       body: JSON.stringify({
         model: "deepseek-chat",
         messages: [
-          { role: "system", content: "You are a professional language learning content creator. Response must be in JSON." },
+          { role: "system", content: STORY_SYSTEM_PROMPT },
+          { role: "user", content: buildStoryUserPrompt(words) }
+        ],
+        response_format: { type: "json_object" }
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("API error:", data.error?.message);
+      return null;
+    }
+
+    const contentStr = data.choices?.[0]?.message?.content;
+    if (!contentStr) {
+      console.error("Empty response from API");
+      return null;
+    }
+
+    const parsed = JSON.parse(contentStr);
+    if (!parsed.lines || !Array.isArray(parsed.lines)) {
+      console.error("Invalid response format:", parsed);
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error("DeepSeek Story Generation Error:", error);
+    return null;
+  }
+};
+
+export const parseScenarioFromImage = async (textContent: string) => {
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
+
+  const prompt = `Based on the following text content, create a language learning conversation scenario.
+The text might come from a screenshot, photo, or typed content. Analyze what the text is about, who the speakers might be, and what context this conversation would take place in.
+
+User's text content:
+"""
+${textContent}
+"""
+
+Return in JSON format:
+{
+  "title": "string (Short catchy name for the scenario)",
+  "description": "string (Brief context of what to practice, based on the text)",
+  "category": "Workplace",
+  "systemPrompt": "string (Detailed instructions for AI on how to behave, tone, and specific topics to cover. Include key vocabulary and phrases from the original text so the AI practices them with the user.)",
+  "initialMessage": "string (The first message AI should say to start the exchange, naturally incorporating elements from the text)"
+}
+
+Note: category MUST be one of: "Workplace", "Daily", "Travel", "Other".`;
+
+  try {
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [
+          { role: "system", content: "You are a language learning scenario designer. Response must be in JSON." },
           { role: "user", content: prompt }
         ],
         response_format: { type: "json_object" }
@@ -143,54 +208,21 @@ export const generatePodcastDialogue = async (words: string[]) => {
     });
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
-    return JSON.parse(content);
-  } catch (error) {
-    console.error("DeepSeek Podcast Error:", error);
-    return null;
-  }
-};
 
-export const parseScenarioFromImage = async (base64Image: string, mimeType: string) => {
-  const prompt = `Analyze this image and create a language learning conversation scenario based on its content. 
-  Extract the key situation, the roles involved, and determine a professional or life category.
-  
-  Return in JSON format:
-  {
-    "title": "string (Short catchy name)",
-    "description": "string (Brief context of what to practice)",
-    "category": "Workplace",
-    "systemPrompt": "string (Detailed instructions for AI on how to behave, tone, and specific topics to cover)",
-    "initialMessage": "string (The first message AI should say to start the exchange)"
-  }
-  
-  Note: category MUST be one of: "Workplace", "Daily", "Travel", "Other".`;
+    if (!response.ok) {
+      console.error("API error:", data.error?.message);
+      return null;
+    }
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: [
-        { inlineData: { data: base64Image, mimeType: mimeType } },
-        { text: prompt }
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            category: { type: Type.STRING },
-            systemPrompt: { type: Type.STRING },
-            initialMessage: { type: Type.STRING }
-          },
-          required: ["title", "description", "category", "systemPrompt", "initialMessage"]
-        }
-      }
-    });
-    return JSON.parse(response.text || "{}");
+    const contentStr = data.choices?.[0]?.message?.content;
+    if (!contentStr) {
+      console.error("Empty response from API");
+      return null;
+    }
+
+    return JSON.parse(contentStr);
   } catch (error) {
-    console.error("Gemini Image Scenario Error:", error);
+    console.error("DeepSeek Scenario Extraction Error:", error);
     return null;
   }
 };

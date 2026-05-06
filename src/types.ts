@@ -40,4 +40,14 @@ export interface Scenario {
   category: Category;
   systemPrompt: string;
   initialMessage: string;
+  extractedText?: string; // 图片中提取的文本，在对话页置顶展示
+}
+
+export interface ChatSession {
+  id: string;
+  scenarioId: string;
+  title: string;
+  messages: ChatMessage[];
+  targetWords?: string[];
+  updatedAt: number;
 }
