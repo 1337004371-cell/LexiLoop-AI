@@ -993,30 +993,60 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-200 text-slate-900 font-sans flex items-start justify-center">
-      {/* Phone Container */}
-      <div className="w-full min-h-dvh lg:max-w-[430px] lg:min-h-[calc(100vh-60px)] lg:my-[30px] bg-[#F2F2F7] lg:rounded-[40px] lg:shadow-[0_20px_60px_rgba(0,0,0,0.12)] lg:border lg:border-gray-200/50 flex flex-col lg:max-h-[calc(100vh-60px)] relative lg:overflow-hidden">
+    <div className="min-h-screen bg-[#F2F2F7] text-slate-900 font-sans">
+      <div className="w-full max-w-[600px] mx-auto min-h-screen flex flex-col relative">
 
       {/* Top Nav (desktop) / Bottom Nav (mobile) */}
-      <nav className="fixed bottom-0 lg:static lg:bottom-auto w-full lg:w-full bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-b border-black/[0.04] flex items-center justify-around lg:justify-start py-2 lg:py-0 lg:px-5 z-50 lg:h-14 lg:shrink-0">
-        {/* Desktop: Logo (left side) — order-first on lg */}
-        <div className="hidden lg:flex items-center gap-2.5 mr-4 lg:order-first">
+      <nav className="fixed bottom-0 lg:sticky lg:top-0 lg:bottom-auto bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-b border-black/[0.04] flex items-center justify-around py-2 lg:py-0 lg:px-6 z-50 lg:h-14 lg:shrink-0">
+        {/* Logo */}
+        <div className="hidden lg:flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm">L</div>
           <span className="font-bold text-base tracking-tight text-slate-900">LexiLoop</span>
         </div>
-
-        {/* Mobile: Logo in bottom bar */}
         <div className="flex lg:hidden items-center gap-1.5">
-          <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-[10px]">L</div>
+          <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-blue-600 rounded-3xl flex items-center justify-center text-white font-bold text-[10px]">L</div>
           <span className="font-bold text-[10px] tracking-tight text-slate-900">LexiLoop</span>
         </div>
 
-        <NavIcon icon={<BookOpen size={20} />} active={activeTab === 'book'} onClick={() => { setActiveTab('book'); setMode('normal'); }} label="生词本" />
-        <NavIcon icon={<MessageSquare size={20} />} active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setMode('normal'); }} label="对话练习" />
-        <NavIcon icon={<Headphones size={20} />} active={activeTab === 'review'} onClick={() => { setActiveTab('review'); setMode('normal'); }} label="背单词" />
+        {/* Tabs: sliding segmented control on desktop */}
+        <div className="hidden lg:flex flex-1 justify-center">
+          <div className="flex bg-slate-100 rounded-2xl p-1">
+            {[
+              { key: 'book' as const, icon: <BookOpen size={16} />, label: '生词本' },
+              { key: 'chat' as const, icon: <MessageSquare size={16} />, label: '对话练习' },
+              { key: 'review' as const, icon: <Headphones size={16} />, label: '背单词' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => { setActiveTab(tab.key); setMode('normal'); }}
+                className={cn(
+                  "relative z-10 flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-sm font-medium transition-colors",
+                  activeTab === tab.key ? "text-white" : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                {activeTab === tab.key && (
+                  <motion.div
+                    layoutId="nav-tab-indicator"
+                    className="absolute inset-0 bg-slate-900 rounded-xl"
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10 flex items-center gap-1.5">
+                  {tab.icon}
+                  {tab.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex lg:hidden">
+          <NavIcon icon={<BookOpen size={20} />} active={activeTab === 'book'} onClick={() => { setActiveTab('book'); setMode('normal'); }} label="生词本" />
+          <NavIcon icon={<MessageSquare size={20} />} active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setMode('normal'); }} label="对话练习" />
+          <NavIcon icon={<Headphones size={20} />} active={activeTab === 'review'} onClick={() => { setActiveTab('review'); setMode('normal'); }} label="背单词" />
+        </div>
 
-        {/* User Avatar / Login button */}
-        <div className="flex items-center justify-center">
+        {/* User Avatar / Login: right on desktop */}
+        <div className="flex items-center justify-center shrink-0">
           {user ? (
             <button onClick={handleLogout} className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-slate-200 hover:ring-blue-300 transition-all">
               <img src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} referrerPolicy="no-referrer" alt="Avatar" className="w-full h-full object-cover" />
@@ -1048,7 +1078,7 @@ export default function App() {
             </div>
 
             {mode !== 'normal' && (
-               <button onClick={handleExitMode} className="text-slate-500 hover:text-slate-900 font-semibold text-sm flex items-center gap-1 bg-white px-4 py-2 rounded-full shadow-[0_2px_12px_rgb(0,0,0,0.04)] transition-all shrink-0">
+               <button onClick={handleExitMode} className="text-slate-500 hover:text-slate-900 font-semibold text-sm flex items-center gap-1 bg-white px-4 py-2 rounded-full shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-all shrink-0">
                  <ChevronLeft size={14} /> 返回
                </button>
             )}
@@ -1063,13 +1093,13 @@ export default function App() {
                   {/* Left Card: Add Word */}
                   <div
                     onClick={() => setIsAddingWord(true)}
-                    className="bg-white p-5 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center justify-center text-center space-y-3 cursor-pointer active:scale-[0.97] transition-all group"
+                    className="bg-white p-5 rounded-3xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] flex flex-col items-center justify-center text-center space-y-3 cursor-pointer active:scale-[0.97] transition-all group"
                   >
                     <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
                       <Plus size={24} />
                     </div>
                     <div>
-                      <h3 className="text-base font-semibold text-slate-900">录入生词</h3>
+                      <h3 className="text-base font-bold tracking-tight text-slate-900">录入生词</h3>
                       <p className="text-slate-500 text-sm mt-0.5">快捷录入表达</p>
                     </div>
                   </div>
@@ -1083,7 +1113,7 @@ export default function App() {
                         ? "bg-blue-50 border-blue-200"
                         : selectedWordIds.size > 0
                           ? "bg-emerald-50/50 border-emerald-100 cursor-pointer shadow-xl"
-                          : "bg-white border-slate-200/60 hover:border-blue-300 cursor-pointer shadow-[0_8px_30px_rgb(0,0,0,0.04)] active:scale-[0.97]"
+                          : "bg-white border-slate-200/60 hover:border-blue-300 cursor-pointer shadow-[0_2px_12px_rgba(0,0,0,0.04)] active:scale-[0.97]"
                     )}
                   >
                     <div className={cn(
@@ -1133,7 +1163,7 @@ export default function App() {
                 {/* Word List Area */}
                 <div className="space-y-5">
                   {words.length === 0 ? (
-                    <div className="bg-white rounded-3xl p-10 text-center text-slate-400 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+                    <div className="bg-white rounded-3xl p-10 text-center text-slate-400 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                       <BookOpen size={40} className="mx-auto mb-4 opacity-20" />
                       <p className="text-sm font-bold">Your Archive is Waiting</p>
                       <p className="text-[10px] mt-1">Start adding words from chat or manual entry.</p>
@@ -1156,7 +1186,7 @@ export default function App() {
                           <div className="h-px bg-gray-100 flex-1" />
                         </div>
 
-                        <div className="bg-white rounded-3xl overflow-hidden p-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-1">
+                        <div className="bg-white rounded-3xl overflow-hidden p-3 shadow-[0_2px_12px_rgba(0,0,0,0.04)] space-y-1">
                           {sortedGroup.map(w => (
                             <WordRow 
                               key={w.id} 
@@ -1229,7 +1259,7 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-3">
                       <div
                         onClick={() => setIsWordDialogueModalOpen(true)}
-                        className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden cursor-pointer active:scale-[0.97] transition-all"
+                        className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-3xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] relative overflow-hidden cursor-pointer active:scale-[0.97] transition-all"
                       >
                         <div className="space-y-2.5">
                           <div className="flex items-center gap-2">
@@ -1237,22 +1267,22 @@ export default function App() {
                               <Lightbulb size={16} className="text-amber-600" />
                             </div>
                           </div>
-                          <h2 className="text-base font-semibold text-slate-900 leading-tight">生词本专项练习</h2>
+                          <h2 className="text-base font-bold tracking-tight text-slate-900 leading-tight">生词本专项练习</h2>
                           <p className="text-slate-500 text-sm leading-relaxed line-clamp-2">选 1-5 个单词，AI 定制对话场景</p>
                         </div>
                       </div>
 
                       <div
                         onClick={() => { setIsAddingScenario(true); setScenarioMode('selection'); }}
-                        className="bg-white rounded-3xl p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative overflow-hidden cursor-pointer active:scale-[0.97] transition-all"
+                        className="bg-white rounded-3xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] relative overflow-hidden cursor-pointer active:scale-[0.97] transition-all"
                       >
                         <div className="space-y-2.5">
                           <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                            <div className="w-8 h-8 bg-gray-100 rounded-3xl flex items-center justify-center">
                               <Plus size={16} className="text-gray-600" />
                             </div>
                           </div>
-                          <h2 className="text-base font-semibold text-slate-900 leading-tight">手动创建对话</h2>
+                          <h2 className="text-base font-bold tracking-tight text-slate-900 leading-tight">手动创建对话</h2>
                           <p className="text-slate-500 text-sm leading-relaxed line-clamp-2">自定义场景与角色，模拟真实对话</p>
                         </div>
                       </div>
@@ -1261,7 +1291,7 @@ export default function App() {
                     {/* Categories and Grid */}
                     <div className="space-y-4">
                        <div className="space-y-3 pb-4">
-                          <h3 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                          <h3 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
                             <Sparkles className="text-blue-600" size={18} />
                             推荐话题
                           </h3>
@@ -1378,7 +1408,7 @@ export default function App() {
                   <div
                     onClick={() => dueWords.length > 0 && setShowDueWords(true)}
                     className={cn(
-                      "bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-4 group",
+                      "bg-white rounded-3xl p-5 shadow-[0_2px_12px_rgba(0,0,0,0.04)] flex items-center gap-4 group",
                       dueWords.length > 0 && "cursor-pointer hover:border-amber-300 active:scale-[0.98] transition-all"
                     )}
                   >
@@ -1387,17 +1417,17 @@ export default function App() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-slate-500 text-sm font-medium">待复习</p>
-                      <h3 className="text-3xl font-bold mt-0.5">{dueWords.length} <span className="text-sm text-slate-400">词</span></h3>
+                      <h3 className="text-3xl font-bold tracking-tight mt-0.5">{dueWords.length} <span className="text-sm text-slate-400">词</span></h3>
                     </div>
                   </div>
 
-                  <div className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-4 group">
+                  <div className="bg-white rounded-3xl p-5 shadow-[0_2px_12px_rgba(0,0,0,0.04)] flex items-center gap-4 group">
                     <div className="w-12 h-12 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                       <Award size={24} />
                     </div>
                     <div className="min-w-0">
                       <p className="text-slate-500 text-sm font-medium">已掌握</p>
-                      <h3 className="text-3xl font-bold mt-0.5">
+                      <h3 className="text-3xl font-bold tracking-tight mt-0.5">
                         {words.filter(w => w.masteryLevel >= 6).length}/{words.length}
                       </h3>
                     </div>
@@ -1466,7 +1496,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[120] flex items-end justify-center"
+            className="fixed inset-0 lg:max-w-[600px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[120] flex items-end justify-center"
             onClick={() => { setIsWordDialogueModalOpen(false); setWordDialogueSelected(new Set()); }}
           >
             <motion.div
@@ -1480,7 +1510,7 @@ export default function App() {
               {/* Header */}
               <div className="p-5 border-b border-black/[0.04]">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-xl text-slate-900">选择练习单词</h3>
+                  <h3 className="font-bold tracking-tight text-xl text-slate-900">选择练习单词</h3>
                   <button onClick={() => { setIsWordDialogueModalOpen(false); setWordDialogueSelected(new Set()); }} className="p-2 hover:bg-slate-100 rounded-xl">
                     <X size={18} />
                   </button>
@@ -1506,7 +1536,7 @@ export default function App() {
                         )}
                       >
                         <div className={cn(
-                          "w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-all",
+                          "w-6 h-6 rounded-3xl flex items-center justify-center shrink-0 transition-all",
                           isSelected ? "bg-blue-600 text-white" : "border-2 border-slate-200"
                         )}>
                           {isSelected && <Check size={14} />}
@@ -1555,7 +1585,7 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/40 backdrop-blur-sm z-[120] flex items-end justify-center"
+            className="fixed inset-0 lg:max-w-[600px] lg:mx-auto bg-black/40 backdrop-blur-sm z-[120] flex items-end justify-center"
             onClick={() => setShowDueWords(false)}
           >
             <motion.div
@@ -1568,7 +1598,7 @@ export default function App() {
             >
               <div className="p-5 border-b border-black/[0.04] flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-xl text-slate-900">今日待复习</h3>
+                  <h3 className="font-bold tracking-tight text-xl text-slate-900">今日待复习</h3>
                   <p className="text-slate-500 text-sm mt-0.5">{dueWords.length} 个单词</p>
                 </div>
                 <button onClick={() => setShowDueWords(false)} className="p-2 hover:bg-slate-100 rounded-xl">
@@ -1587,7 +1617,7 @@ export default function App() {
                     </div>
                     <div className="shrink-0">
                       <div className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-semibold",
+                        "w-8 h-8 rounded-3xl flex items-center justify-center text-xs font-semibold",
                         w.masteryLevel === 0 ? "bg-red-50 text-red-400" :
                         w.masteryLevel < 3 ? "bg-amber-50 text-amber-500" :
                         "bg-emerald-50 text-emerald-500"
@@ -1606,10 +1636,10 @@ export default function App() {
       {/* Add Word Modal */}
       <AnimatePresence>
         {isAddingWord && (
-          <div className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[100] flex items-center justify-center p-6">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white w-full rounded-3xl p-6 relative shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
+          <div className="fixed inset-0 lg:max-w-[600px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[100] flex items-center justify-center p-6">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="bg-white w-full rounded-3xl p-6 relative shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
               <button onClick={() => { setIsAddingWord(false); setNewWordInput(''); setAddWordTab('text'); setBatchProgress(null); }} className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors"><X size={22} /></button>
-              <h3 className="text-xl font-semibold text-slate-900 mb-4">添加生词</h3>
+              <h3 className="text-xl font-bold tracking-tight text-slate-900 mb-4">添加生词</h3>
 
               {/* Tab Switcher */}
               <div className="flex bg-slate-100 rounded-xl p-1 mb-4">
@@ -1618,7 +1648,7 @@ export default function App() {
                     key={tab}
                     onClick={() => setAddWordTab(tab)}
                     className={cn(
-                      'flex-1 py-2 rounded-lg text-sm font-semibold transition-all',
+                      'flex-1 py-2 rounded-3xl text-sm font-semibold transition-all',
                       addWordTab === tab ? 'bg-white shadow-sm text-slate-900' : 'text-gray-400'
                     )}
                   >
@@ -1745,8 +1775,8 @@ export default function App() {
       {/* Add Scenario Modal */}
       <AnimatePresence>
         {isAddingScenario && (
-          <div className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
-            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full rounded-3xl p-6 relative shadow-[0_20px_60px_rgba(0,0,0,0.12)] max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 lg:max-w-[600px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
+            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full rounded-3xl p-6 relative shadow-[0_2px_12px_rgba(0,0,0,0.04)] max-h-[90vh] overflow-y-auto">
               <button onClick={() => { setIsAddingScenario(false); setScenarioMode('selection'); }} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"><X size={22} /></button>
 
               {scenarioMode === 'selection' && (
@@ -1755,18 +1785,18 @@ export default function App() {
                     <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
                       <Plus size={24} />
                     </div>
-                    <h3 className="text-xl font-semibold text-slate-900 mb-1">Create Scenario</h3>
+                    <h3 className="text-xl font-bold tracking-tight text-slate-900 mb-1">Create Scenario</h3>
                     <p className="text-slate-500 text-sm">How do you want to define your simulation?</p>
                   </div>
 
                   <div className="grid grid-cols-1 gap-3">
-                    <button onClick={() => setScenarioMode('manual')} className="p-4 rounded-2xl text-left hover:bg-blue-50 transition-all group shadow-[0_2px_12px_rgb(0,0,0,0.03)] ring-1 ring-black/[0.03]">
+                    <button onClick={() => setScenarioMode('manual')} className="p-4 rounded-2xl text-left hover:bg-blue-50 transition-all group shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.03]">
                       <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><FileText size={20} className="text-blue-600" /></div>
-                      <h4 className="font-semibold text-base text-slate-900 mb-0.5">Manual Entry</h4>
+                      <h4 className="font-bold tracking-tight text-base text-slate-900 mb-0.5">Manual Entry</h4>
                       <p className="text-slate-500 text-sm">Type name, roles, and instructions yourself.</p>
                     </button>
                     
-                    <button onClick={() => setScenarioMode('image')} className="p-4 rounded-2xl text-left hover:bg-emerald-50 transition-all group shadow-[0_2px_12px_rgb(0,0,0,0.03)] ring-1 ring-black/[0.03]">
+                    <button onClick={() => setScenarioMode('image')} className="p-4 rounded-2xl text-left hover:bg-emerald-50 transition-all group shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.03]">
                       <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><ImageIcon size={20} className="text-emerald-600" /></div>
                       <h4 className="font-bold text-sm mb-0.5">From Image</h4>
                       <p className="text-gray-400 text-[11px]">Upload a photo to extract context instantly.</p>
@@ -1796,14 +1826,14 @@ export default function App() {
         {inspectedWord && (
           <div 
             onClick={() => setInspectedWord(null)}
-            className="fixed inset-0 lg:max-w-[430px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[110] flex items-start justify-center p-6 overflow-y-auto pt-20"
+            className="fixed inset-0 lg:max-w-[600px] lg:mx-auto bg-black/30 backdrop-blur-xl z-[110] flex items-start justify-center p-6 overflow-y-auto pt-20"
           >
             <motion.div 
               onClick={(e) => e.stopPropagation()}
               initial={{ y: 20, opacity: 0 }} 
               animate={{ y: 0, opacity: 1 }} 
               exit={{ y: 20, opacity: 0 }} 
-              className="bg-white w-full rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.12)] relative mb-12"
+              className="bg-white w-full rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] relative mb-12"
             >
               <button
                 onClick={() => setInspectedWord(null)}
@@ -1836,13 +1866,13 @@ export default function App() {
 
               <div className="space-y-8">
                 <section>
-                  <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Definition</h4>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Definition</h4>
                   <p className="text-xl font-semibold text-slate-900 leading-relaxed">{inspectedWord.details.definition}</p>
                 </section>
 
                 {inspectedWord.details.collocations && inspectedWord.details.collocations.length > 0 && (
                   <section>
-                    <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Collocations</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Collocations</h4>
                     <div className="flex flex-wrap gap-2">
                       {inspectedWord.details.collocations.map((c: any, i: number) => (
                         <div key={i} className="bg-slate-50 px-3 py-2.5 rounded-xl flex items-center gap-3 group/coll">
@@ -1860,7 +1890,7 @@ export default function App() {
                 )}
 
                 <section>
-                  <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Contextual Examples</h4>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">Contextual Examples</h4>
                   <div className="space-y-4">
                     {inspectedWord.details.examples.map((ex: any, i: number) => (
                       <div key={i} className="bg-slate-50 p-4 rounded-2xl flex justify-between items-start group/ex">
@@ -1904,7 +1934,7 @@ export default function App() {
       {/* Global Loading Spinner */}
       <AnimatePresence>
         {isLoading && !isAddingWord && !inspectedWord && mode !== 'podcast' && (
-          <div className="fixed bottom-10 right-10 z-[100] bg-white p-4 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] flex items-center gap-4">
+          <div className="fixed bottom-10 right-10 z-[100] bg-white p-4 rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.04)] flex items-center gap-4">
             <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
             <span className="text-sm font-semibold text-slate-500">Gemini is processing...</span>
           </div>
@@ -1925,13 +1955,13 @@ function TrainingModule({ icon, title, description, color, onClick }: { icon: Re
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-3xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-4 cursor-pointer active:scale-[0.97] transition-all group"
+      className="bg-white rounded-3xl p-5 shadow-[0_2px_12px_rgba(0,0,0,0.04)] flex items-center gap-4 cursor-pointer active:scale-[0.97] transition-all group"
     >
       <div className={cn("w-14 h-14 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center transition-all shrink-0", colorMap[color])}>
         {icon}
       </div>
       <div className="min-w-0">
-        <h4 className="text-base font-semibold text-slate-900">{title}</h4>
+        <h4 className="text-base font-bold tracking-tight text-slate-900">{title}</h4>
         <p className="text-slate-500 text-sm leading-relaxed mt-1">{description}</p>
       </div>
     </div>
@@ -1940,9 +1970,9 @@ function TrainingModule({ icon, title, description, color, onClick }: { icon: Re
 
 function NavIcon({ icon, active, onClick, label }: { icon: React.ReactNode, active: boolean, onClick: () => void, label: string }) {
   return (
-    <button onClick={onClick} className={cn("group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all", active ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-700")}>
+    <button onClick={onClick} className={cn("group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all", active ? "bg-slate-900 text-white" : "text-slate-400 hover:text-slate-700")}>
       {icon}
-      {active && <span className="lg:hidden absolute -top-1 left-1/2 -translate-x-1/2 w-5 h-1 bg-blue-600 rounded-b-full" />}
+      {active && <span className="lg:hidden absolute -top-1 left-1/2 -translate-x-1/2 w-5 h-1 bg-slate-900 rounded-b-full" />}
       <span className="sr-only">{label}</span>
     </button>
   );
@@ -2014,7 +2044,7 @@ function ScenarioForm({ onSave, onBack }: { onSave: (s: Scenario) => void, onBac
     <div className="space-y-6 py-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">手动创建对话</h3>
+          <h3 className="text-xl font-bold tracking-tight text-slate-900">手动创建对话</h3>
           <p className="text-slate-500 text-sm">描述你想要的对话场景，AI 自动生成标题</p>
         </div>
         <button onClick={onBack} className="text-slate-500 hover:text-slate-900 font-semibold text-sm">取消</button>
@@ -2105,7 +2135,7 @@ function ImageScenarioExtractor({ onExtracted, onBack, onLoading }: { onExtracte
     <div className="space-y-5 py-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900 mb-1">从图片创建对话</h3>
+          <h3 className="text-xl font-bold tracking-tight text-slate-900 mb-1">从图片创建对话</h3>
           <p className="text-slate-500 text-sm">上传图片，输入其中的文本内容，AI 自动生成对话</p>
         </div>
         <button onClick={onBack} className="text-slate-500 hover:text-slate-900 font-semibold text-sm">取消</button>
@@ -2228,7 +2258,7 @@ const WordRow: React.FC<{
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className={cn("relative p-4 transition-colors group bg-white", expanded ? "bg-slate-50 my-2 shadow-[0_2px_12px_rgb(0,0,0,0.03)] ring-1 ring-black/[0.03]" : "hover:bg-slate-50")}
+        className={cn("relative p-4 transition-colors group bg-white", expanded ? "bg-slate-50 my-2 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.03]" : "hover:bg-slate-50")}
       >
         <div className="flex items-center gap-4">
           {isSelectionMode && (
@@ -2263,7 +2293,7 @@ const WordRow: React.FC<{
               {hasMissingData && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onRefresh?.(); }}
-                  className="text-[10px] font-semibold text-amber-500 bg-amber-50 px-2 py-1 rounded-lg flex items-center gap-1 hover:bg-amber-100 transition-all ml-auto md:ml-0"
+                  className="text-[10px] font-semibold text-amber-500 bg-amber-50 px-2 py-1 rounded-3xl flex items-center gap-1 hover:bg-amber-100 transition-all ml-auto md:ml-0"
                 >
                   <RotateCcw size={10} /> Data Incomplete - Sync?
                 </button>
@@ -2297,7 +2327,7 @@ const WordRow: React.FC<{
                 {word.collocations && word.collocations.length > 0 ? (
                   <div className="flex flex-wrap gap-3">
                     {word.collocations.map((c, i) => (
-                      <div key={i} className="bg-white px-4 py-3 rounded-xl flex items-center gap-4 hover:bg-blue-50/50 transition-all group/coll shadow-[0_2px_8px_rgb(0,0,0,0.02)]">
+                      <div key={i} className="bg-white px-4 py-3 rounded-xl flex items-center gap-4 hover:bg-blue-50/50 transition-all group/coll shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                         <div>
                           <span className="font-semibold text-slate-800 text-sm block">{c.phrase}</span>
                           <span className="text-xs text-slate-400">{c.translation}</span>
@@ -2346,7 +2376,7 @@ const ScenarioCard: React.FC<{ scenario: Scenario, onClick: () => void }> = ({ s
   const colorClass = scenario.category === 'Workplace' ? 'text-blue-600 bg-blue-50' : scenario.category === 'Shopping' ? 'text-emerald-600 bg-emerald-50' : scenario.category === 'Travel' ? 'text-amber-600 bg-amber-50' : 'text-gray-600 bg-gray-50';
 
   return (
-    <button onClick={onClick} className="bg-white p-3.5 rounded-2xl text-left hover:shadow-[0_4px_20px_rgb(0,0,0,0.06)] transition-all group overflow-hidden flex flex-col h-full shadow-[0_2px_12px_rgb(0,0,0,0.03)] relative">
+    <button onClick={onClick} className="bg-white p-3.5 rounded-2xl text-left hover:shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-all group overflow-hidden flex flex-col h-full shadow-[0_2px_12px_rgba(0,0,0,0.04)] relative">
       {isCustom && (
         <div className="absolute top-2 right-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-semibold rounded-full">
           Manual
@@ -2355,7 +2385,7 @@ const ScenarioCard: React.FC<{ scenario: Scenario, onClick: () => void }> = ({ s
       <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center mb-2 transition-all group-hover:scale-110", colorClass)}>
         <Icon size={16} />
       </div>
-      <h3 className="text-sm font-semibold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">{scenario.title}</h3>
+      <h3 className="text-sm font-bold tracking-tight text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">{scenario.title}</h3>
       <p className="text-slate-500 text-xs leading-relaxed line-clamp-2 mt-1">{scenario.description}</p>
     </button>
   );
@@ -2389,9 +2419,9 @@ const HistoryCard: React.FC<{
       }}
       onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
       onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-      className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgb(0,0,0,0.03)] cursor-pointer hover:shadow-[0_4px_20px_rgb(0,0,0,0.06)] transition-all active:bg-slate-50 select-none"
+      className="bg-white rounded-2xl p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] cursor-pointer hover:shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-all active:bg-slate-50 select-none"
     >
-      <h4 className="font-semibold text-base text-slate-900">{data.title}</h4>
+      <h4 className="font-bold tracking-tight text-base text-slate-900">{data.title}</h4>
       {type === 'session' ? (
         <>
           <p className="text-gray-400 text-[10px] mt-1">
@@ -2467,11 +2497,11 @@ function ChatInterface({ scenario, onBack, onAddWord, targetWords, initialMessag
   };
 
   return (
-    <div className="h-[80vh] lg:h-[500px] flex flex-col bg-white rounded-3xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)] relative">
+    <div className="h-[80vh] lg:h-[500px] flex flex-col bg-white rounded-3xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.04)] relative">
       <div className="p-4 md:p-6 border-b border-black/[0.04] flex items-center justify-between">
         <button onClick={() => { cancel(); onBack(messages); }} className="p-2 hover:bg-gray-100 rounded-xl"><ChevronLeft size={24} /></button>
         <div className="flex flex-col items-center">
-          <h3 className="font-semibold text-base md:text-lg line-clamp-1 text-slate-900">{scenario.title}</h3>
+          <h3 className="font-bold tracking-tight text-base md:text-lg line-clamp-1 text-slate-900">{scenario.title}</h3>
           <span className="text-xs font-medium text-slate-500 tracking-wide leading-none">Fluid Exchange</span>
         </div>
         <div className="w-10" />
@@ -2519,7 +2549,7 @@ function ChatInterface({ scenario, onBack, onAddWord, targetWords, initialMessag
                  <Sparkles size={16} className="text-blue-600" />
                  <span className="text-sm font-bold text-blue-900">Recommended Phrase: <span className="italic">{suggestion}</span></span>
                </div>
-               <button onClick={() => onAddWord(suggestion)} className="text-[10px] font-extrabold uppercase bg-blue-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-2">
+               <button onClick={() => onAddWord(suggestion)} className="text-[10px] font-extrabold uppercase bg-blue-600 text-white px-3 py-1.5 rounded-3xl flex items-center gap-2">
                  <Plus size={14} /> ADD TO ARCHIVE
                </button>
              </div>
@@ -2597,7 +2627,7 @@ function FlashcardView({ words, onResult, onFinish, speak }: { words: Word[], on
           className="w-full h-full relative preserve-3d"
         >
           {/* Front */}
-          <div className="absolute inset-0 backface-hidden bg-white rounded-3xl flex flex-col items-center justify-center p-6 shadow-[0_8px_30px_rgb(0,0,0,0.06)]">
+          <div className="absolute inset-0 backface-hidden bg-white rounded-3xl flex flex-col items-center justify-center p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
             <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
               <Volume2 size={24} />
             </div>
@@ -2689,7 +2719,7 @@ function PronunciationChallengeView({
 
   return (
     <div className="w-full mx-auto py-6">
-      <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 text-center relative overflow-hidden">
+      <div className="bg-white rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] space-y-6 text-center relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100">
           <motion.div
             className="h-full bg-emerald-500"
@@ -2700,7 +2730,7 @@ function PronunciationChallengeView({
 
         <div className="space-y-1 pt-2">
           <span className="text-sm font-medium text-slate-500">Pronunciation Challenge</span>
-          <h2 className="text-3xl font-bold text-slate-900 leading-tight">请读出该单词的英文</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-slate-900 leading-tight">请读出该单词的英文</h2>
         </div>
 
         <div className="py-8 px-6 bg-slate-50 rounded-2xl">
@@ -2803,7 +2833,7 @@ function SpellingBeeView({ words, onResult, onFinish, speak }: { words: Word[], 
 
   return (
     <div className="w-full mx-auto py-6">
-      <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6 text-center relative overflow-hidden">
+      <div className="bg-white rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] space-y-6 text-center relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gray-100">
           <motion.div
             className="h-full bg-emerald-500"
