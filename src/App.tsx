@@ -670,7 +670,7 @@ export default function App() {
     const wordList = selectedWords.join(', ');
     const scenario: Scenario = {
       id: `word-dialogue-${Date.now()}`,
-      title: `词汇练习: ${selectedWords.slice(0, 3).join(', ')}${selectedWords.length > 3 ? '...' : ''}`,
+      title: `词汇练习'}`,
       description: `围绕 ${selectedWords.length} 个核心词汇的对话练习`,
       category: 'Workplace',
       systemPrompt: `你现在是一个口语教练。用户选择了以下核心词汇：[${wordList}]。
@@ -997,7 +997,7 @@ export default function App() {
       <div className="w-full max-w-[600px] mx-auto min-h-screen flex flex-col relative">
 
       {/* Top Nav (desktop) / Bottom Nav (mobile) */}
-      <nav className="fixed bottom-0 lg:sticky lg:top-0 lg:bottom-auto bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-b border-black/[0.04] flex items-center justify-around py-2 lg:py-0 lg:px-6 z-50 lg:h-14 lg:shrink-0">
+      <nav className="fixed bottom-0 lg:sticky lg:top-0 lg:bottom-auto bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-b border-black/[0.04] flex items-center justify-around py-3 px-2 lg:py-0 lg:px-6 z-50 lg:h-14 lg:shrink-0">
         {/* Logo */}
         <div className="hidden lg:flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm">L</div>
@@ -2523,7 +2523,7 @@ function ChatInterface({ scenario, onBack, onAddWord, targetWords, initialMessag
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8" pb-40>
         {messages.map((m, i) => (
           <div key={i} className={cn("flex", m.role === 'user' ? "justify-end" : "justify-start")}>
             <div className={cn("max-w-[85%] p-3 rounded-xl relative group text-sm", m.role === 'user' ? "bg-gray-900 text-white rounded-tr-none" : "bg-gray-100 rounded-tl-none")}>
@@ -2557,7 +2557,7 @@ function ChatInterface({ scenario, onBack, onAddWord, targetWords, initialMessag
         )}
       </AnimatePresence>
 
-      <div className="p-4 md:p-6 border-t border-black/[0.04] bg-white">
+      <div className="fixed bottom-[72px] left-0 right-0 p-4 md:p-6 border-t border-black/[0.04] bg-white/90 backdrop-blur-md z-40">
         <div className="flex gap-2 md:gap-4">
           <div className="flex-1 relative">
             <input 
