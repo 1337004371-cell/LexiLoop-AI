@@ -997,7 +997,7 @@ export default function App() {
       <div className="w-full max-w-[600px] mx-auto min-h-screen flex flex-col relative">
 
       {/* Top Nav (desktop) / Bottom Nav (mobile) */}
-      <nav className="fixed bottom-0 lg:sticky lg:top-0 lg:bottom-auto bg-white/80 backdrop-blur-xl border-t lg:border-t-0 lg:border-b border-black/[0.04] flex items-center justify-around py-3 px-2 lg:py-0 lg:px-6 z-50 lg:h-14 lg:shrink-0">
+      <nav className="fixed bottom-0 left-0 right-0 w-full bg-white/80 backdrop-blur-xl border-t border-black/[0.04] flex items-center justify-around py-2 z-50 lg:max-w-[600px] lg:left-1/2 lg:-translate-x-1/2">
         {/* Logo */}
         <div className="hidden lg:flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm">L</div>
