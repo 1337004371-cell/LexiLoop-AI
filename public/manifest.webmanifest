@@ -8,12 +8,12 @@
   "theme_color": "#2563eb",
   "icons": [
     {
-      "src": "https://picsum.photos/seed/lexiloop/192/192",
+      "src": "https://api.dicebear.com/7.x/bottts/svg?seed=lexiloop&backgroundColor=2563eb&radius=20",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "https://picsum.photos/seed/lexiloop/512/512",
+      "src": "https://api.dicebear.com/7.x/shapes/svg?seed=lexiloop-pro&backgroundColor=2563eb",
       "sizes": "512x512",
       "type": "image/png"
     }
