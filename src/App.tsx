@@ -1039,7 +1039,7 @@ export default function App() {
             ))}
           </div>
         </div>
-        <div className="flex lg:hidden">
+        <div className="flex lg:hidden items-center gap-10">
           <NavIcon icon={<BookOpen size={20} />} active={activeTab === 'book'} onClick={() => { setActiveTab('book'); setMode('normal'); }} label="生词本" />
           <NavIcon icon={<MessageSquare size={20} />} active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setMode('normal'); }} label="对话练习" />
           <NavIcon icon={<Headphones size={20} />} active={activeTab === 'review'} onClick={() => { setActiveTab('review'); setMode('normal'); }} label="背单词" />
