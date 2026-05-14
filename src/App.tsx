@@ -2557,7 +2557,7 @@ function ChatInterface({ scenario, onBack, onAddWord, targetWords, initialMessag
         )}
       </AnimatePresence>
 
-      <div className="fixed bottom-[72px] left-0 right-0 p-4 md:p-6 border-t border-black/[0.04] bg-white/90 backdrop-blur-md z-40">
+      <div className="fixed bottom-[72px] left-0 right-0 w-full p-4 md:p-6 border-t border-black/[0.04] bg-white/90 backdrop-blur-md z-40 lg:max-w-[600px] lg:left-1/2 lg:-translate-x-1/2">
         <div className="flex gap-2 md:gap-4">
           <div className="flex-1 relative">
             <input 
