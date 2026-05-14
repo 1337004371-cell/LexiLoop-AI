@@ -670,7 +670,7 @@ export default function App() {
     const wordList = selectedWords.join(', ');
     const scenario: Scenario = {
       id: `word-dialogue-${Date.now()}`,
-      title: `词汇练习'}`,
+      title: `词汇练习`,
       description: `围绕 ${selectedWords.length} 个核心词汇的对话练习`,
       category: 'Workplace',
       systemPrompt: `你现在是一个口语教练。用户选择了以下核心词汇：[${wordList}]。
